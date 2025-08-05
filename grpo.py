@@ -1,6 +1,7 @@
 import random
 from copy import deepcopy
 import torch
+from wrapper import CodeAgentWrapper
 
 
 def copy_model(model):
@@ -9,51 +10,43 @@ def copy_model(model):
 def sample_batch(dataset, batch_size=4):
     return random.sample(dataset, batch_size)
 
-def compute_advantanges(rewards):
-    pass
+# Outcome supervision (for the entire output)
+def compute_advantanges(rewards, completion_lengths):
+    r = torch.tensor(rewards, dtype=torch.float32)
+    mean = r.mean()
+    std = r.std(unbiased=False)
+    normalized_r = (r - mean) / (std + 1e-8)
 
-def grpo_loss(pi_theta, pi_old, traces, advantages, epsilon, beta):
+    advantages = []
+    for norm_r_i, length in zip(normalized_r, completion_lengths):
+        advantages.extend([norm_r_i] * length)
+    return advantages
 
-    pairs = traces
-    device = advantages.device
+def grpo_loss(pi_theta_log_probs, pi_old_log_probs, traces, advantages, epsilon, beta):
+    device = pi_theta_log_probs.device
     trace_map = torch.arange(len(traces), device=device)
-
-
-    all_prompts = [p['prompt'] for p in pairs]
-    all_completions = [p['completion'] for p in pairs]
-
-    # Get log-probabilities from models
-    current_log_p_batch, old_log_p_batch, completion_lengths = pi_theta.get_log_probs_for_batch(
-        pi_old, all_prompts, all_completions
-    )  # shape: (N, T)
-
-    device = current_log_p_batch.device
-    trace_map = torch.arange(len(traces), device=device)
-    advantages = advantages.to(device)
-
-    # === GRPO loss ===
 
     # Compute sum of log-probs per completion
-    current_log_p_sum = current_log_p_batch.sum(dim=-1)
-    old_log_p_sum = old_log_p_batch.sum(dim=-1)
+    pi_theta_log_probs_sum = pi_theta_log_probs.sum(dim=-1)
+    pi_old_log_probs_sum = pi_old_log_probs.sum(dim=-1)
 
     # Probability ratios
-    ratio = torch.exp(current_log_p_sum - old_log_p_sum)
+    ratio = torch.exp(pi_theta_log_probs_sum - pi_old_log_probs_sum)
     A_per_completion = advantages  # map back to each completion
 
     # Clipped surrogate gain
     clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
     policy_gain = torch.min(ratio * A_per_completion, clipped_ratio * A_per_completion)
 
-    # === KL regularization (Equation 4, KL[pi_theta || pi_old]) ===
-    # log(pi_theta) - log(pi_old)
-    log_ratio = current_log_p_batch - old_log_p_batch
-    kl_term = (torch.exp(log_ratio) - log_ratio - 1.0).sum(dim=-1)  # sum over tokens
+    # KL regularization (Equation 4)
+    # Equation 4: (pi_theta / pi_old) - log(pi_theta / pi_old) - 1
+    log_ratio = pi_theta_log_probs - pi_old_log_probs  # shape: (N, T)
+    kl_ratio = torch.exp(log_ratio)
+    kl_term = (kl_ratio - log_ratio - 1.0).sum(dim=-1)
 
     # Completion-level loss
     completion_loss = -(policy_gain - beta * kl_term)
 
-    # === Aggregate per-trace ===
     trace_losses = torch.zeros(len(traces), device=device)
     trace_counts = torch.zeros(len(traces), device=device)
 
@@ -76,7 +69,7 @@ def train_grpo(
         reward_function,
         config,
 ):
-    # pi_theta is the updated policy model
+    # pi_theta is the updated policy model, pi_old is the initial policy model.
     pi_theta = copy_model(initial_policy)
 
     for _ in range(config["I"]):
@@ -84,16 +77,42 @@ def train_grpo(
         advantages = compute_advantanges(rewards)
 
         for _ in range(config["mu"]):
-            loss = grpo_loss(pi_theta, initial_policy, traces, advantages, config["epsilon"], config["beta"])
+            prompts = [p['prompt'] for p in traces]
+            completions = [p['completion'] for p in traces]
+
+            # Get log-probabilities from models
+            pi_theta_log_probs, pi_old_log_probs = pi_theta.get_log_probs(
+                initial_policy, prompts, completions
+            )  # shape: (N, T)
+            loss = grpo_loss(
+                pi_theta_log_probs=pi_theta_log_probs,
+                pi_old_log_probs=pi_old_log_probs,
+                traces=traces,
+                advantages=advantages,
+                epsilon=config["epsilon"],
+                beta=config["beta"]
+            )
             pi_theta = update_policy(pi_theta, loss)
 
     return pi_theta
 
 
 if __name__ == "__main__":
-    initial_policy = None
-    traces = []
-    reward_function = None
+    def get_groundtruth(prompt):
+        return "ground_truth_answer_for_" + prompt
+
+    def compute_reward(prompt, completion):
+        ground_truth = get_groundtruth(prompt)
+        return 1.0 if completion == ground_truth else 0.0
+
+    initial_policy = CodeAgentWrapper("gpt2")
+    traces = [
+        {"prompt": "What is 7 + 6?", "completion": "13"},
+        {"prompt": "Which number is greater: 12 or 9?", "completion": "12"},
+        {"prompt": "Is 10 an even number?", "completion": "Yes"},
+        {"prompt": "What is the square of 5?", "completion": "25"},
+        {"prompt": "What is the next number after 99?", "completion": "100"}
+    ]
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
@@ -104,6 +123,6 @@ if __name__ == "__main__":
     new_policy = train_grpo(
         initial_policy=initial_policy,
         traces=traces,
-        reward_function=reward_function,
+        reward_function=compute_reward,
         config=config
     )
