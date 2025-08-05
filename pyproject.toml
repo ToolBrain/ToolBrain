@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toolbrain"
+version = "0.1.0"
+description = "A framework for training LLM-powered agents to use tools more effectively using Reinforcement Learning"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+authors = [
+    {name = "ToolBrain Team", email = "team@toolbrain.ai"}
+]
+keywords = ["llm", "agents", "reinforcement-learning", "tools", "ai"]
+
+dependencies = [
+    "smolagents>=0.1.0",
+    "openai>=1.0.0",
+    "typing-extensions>=4.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "isort>=5.0.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/toolbrain/toolbrain"
+Documentation = "https://toolbrain.readthedocs.io"
+Repository = "https://github.com/toolbrain/toolbrain"
+Issues = "https://github.com/toolbrain/toolbrain/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["toolbrain*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true 
