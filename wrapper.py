@@ -60,7 +60,7 @@ class CodeAgentWrapper(nn.Module):
         
         completion_lengths = (sliced_labels != self.tokenizer.pad_token_id).sum(dim=-1)
         
-        return current_log_probs, old_log_probs, completion_lengths
+        return current_log_probs, old_log_probs
 
 if __name__ == "__main__":
     model_id = "gpt2"
@@ -78,8 +78,7 @@ if __name__ == "__main__":
     ]
     
     pi_old = wrapper 
-    log_probs, old_log_probs, lengths = wrapper.get_log_probs(pi_old, prompts, completions)
+    log_probs, old_log_probs = wrapper.get_log_probs(pi_old, prompts, completions)
     
     print("Log probabilities:", log_probs)
     print("Old log probabilities:", old_log_probs)
-    print("Completion lengths:", lengths)
