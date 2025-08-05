@@ -23,6 +23,9 @@ def compute_advantanges(rewards, completion_lengths):
     return advantages
 
 def grpo_loss(pi_theta_log_probs, pi_old_log_probs, traces, advantages, epsilon, beta):
+    """
+    Implement Equation 3 for a batch of traces, but use pi_old for pi_ref for simplicity.
+    """
     device = pi_theta_log_probs.device
     trace_map = torch.arange(len(traces), device=device)
 
