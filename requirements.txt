@@ -1,0 +1,5 @@
+torch
+transformers
+smolagents[transformers]
+duckduckgo_search
+dotenv
