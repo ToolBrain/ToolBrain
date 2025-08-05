@@ -58,7 +58,7 @@ class CodeAgentWrapper(nn.Module):
                                 .unsqueeze(-1))\
                                 .squeeze(-1)
         
-        completion_lengths = (sliced_labels != self.tokenizer.pad_token_id).sum(dim=-1)
+        #completion_lengths = (sliced_labels != self.tokenizer.pad_token_id).sum(dim=-1)
         
         return current_log_probs, old_log_probs
 
