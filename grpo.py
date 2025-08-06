@@ -4,9 +4,17 @@ import torch
 from wrapper import CodeAgentWrapper
 from grpo_utils import *
 
-def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta, completion_mask):
+def grpo_loss(
+        pi_theta_log_probs: torch.Tensor,
+        pi_ref_log_probs: torch.Tensor,
+        advantages: torch.Tensor,
+        epsilon: float,
+        beta: float,
+        completion_mask: torch.Tensor
+) -> torch.Tensor:
     """
-    GRPO objective function as described in Equation 3 but return the loss instead of the gain.
+    Computes the GRPO loss function as defined in Equation (3) of the DeepSeekMath paper.
+    This implementation returns the negative of the original gain (objective) for optimization via gradient descent.
     """
 
     # Clipped surrogate gain
@@ -35,33 +43,26 @@ def update_policy(pi_theta, loss):
     return pi_theta
 
 
-def train_grpo(
-        initial_policy,
-        trace,
-        reward_function,
-        config,
-):
+def grpo_step(
+        initial_policy: CodeAgentWrapper,
+        trace: list[tuple[str, str]],
+        reward_function: callable,
+        config: dict
+) -> CodeAgentWrapper:
+    
     pi_theta = copy_model(initial_policy)
 
     input_ids, completion_mask, rewards, advantages = build_inputs(
         trace=trace,
         tokenizer=pi_theta.tokenizer,
         reward_function=reward_function,
-    ) # Input_ids shape: (T,), completion_mask shape: (T,), rewards shape: (T,)
-
-    print(f"Input IDs shape: {input_ids.shape}, Completion Mask shape: {completion_mask.shape}")
-    print(f"Rewards shape: {rewards.shape}, Rewards: {rewards}")
-    print(f"Advantages shape: {advantages.shape}, Advantages: {advantages}")
+    ) # All have shape (T,)
 
     for _ in range(config["mu"]):
 
         # Get log-probabilities from models
         pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (T,)
         pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (T,)
-
-        print(f"Pi_theta log probs shape: {pi_theta_log_probs.shape}, Pi_ref log probs shape: {pi_ref_log_probs.shape}")
-        print(f"Pi_theta log probs: {pi_theta_log_probs}")
-        print(f"Pi_ref log probs: {pi_ref_log_probs}")
 
         loss = grpo_loss(
             pi_theta_log_probs=pi_theta_log_probs,
@@ -89,10 +90,8 @@ if __name__ == "__main__":
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
         "mu": 1, # Number of GRPO optimization steps per batch
-        "I": 1, # Number of policy updates
-        "M": 1, # Number of batches per iteration
     }
-    new_policy = train_grpo(
+    new_policy = grpo_step(
         initial_policy=initial_policy,
         trace=trace,
         reward_function=compute_reward,
