@@ -2,6 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from grpo_utils import build_input_and_completion_mask
+
+
+def get_per_token_logps(logits, input_ids):
+    per_token_logps = [] # Use a loop to reduce memory peak.
+    for logits_row, input_ids_row in zip(logits, input_ids):
+        log_probs = logits_row.log_softmax(dim=-1)
+        token_log_prob = torch.gather(log_probs, dim=1, index=input_ids_row.unsqueeze(1)).squeeze(1)
+        per_token_logps.append(token_log_prob)
+    return torch.stack(per_token_logps)
 
 class CodeAgentWrapper(nn.Module):
     def __init__(self, model_id):
@@ -13,72 +23,25 @@ class CodeAgentWrapper(nn.Module):
 
         self.model = AutoModelForCausalLM.from_pretrained(model_id)
 
-    def get_log_probs(self, pi_old, prompts: list[str], completions: list[str]):
-        prompt_inputs = self.tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True
-        )
-        completion_inputs = self.tokenizer(
-            completions,
-            return_tensors="pt",
-            padding=True,
-            truncation=True
-        )
-
-        inputs = {
-            "input_ids": torch.cat(
-                [prompt_inputs["input_ids"], completion_inputs["input_ids"]],
-                dim=1
-            ),
-            "attention_mask": torch.cat(
-                [prompt_inputs["attention_mask"], completion_inputs["attention_mask"]],
-                dim=1
-            )
-        }
-
-        current_logits = self.model(**inputs).logits # shape [batch_size, seq_len, vocab_size]
-        with torch.no_grad():
-            old_logits = pi_old.model(**inputs).logits # shape [batch_size, seq_len, vocab_size]
-
-        start_idx = prompt_inputs['input_ids'].shape[1]
-        end_idx = inputs['input_ids'].shape[1] - 1
+    def get_log_probs(self, input_ids: torch.Tensor):
+        logits = self.model(input_ids.unsqueeze(0)).logits  # (B, L, V)
+        logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
         
-
-        sliced_current_logits = current_logits[:, start_idx - 1:end_idx]
-        sliced_old_logits = old_logits[:, start_idx - 1:end_idx]
-        sliced_labels = inputs['input_ids'][:, start_idx:end_idx + 1]
+        input_ids = input_ids.unsqueeze(0)  # (B, L), add batch dimension
+        input_ids = input_ids[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
         
-        current_log_probs = F.log_softmax(sliced_current_logits, dim=-1)\
-                                .gather(2, sliced_labels.unsqueeze(-1))\
-                                .squeeze(-1)
-        old_log_probs = F.log_softmax(sliced_old_logits, dim=-1)\
-                                .gather(2, sliced_labels\
-                                .unsqueeze(-1))\
-                                .squeeze(-1)
-        
-        #completion_lengths = (sliced_labels != self.tokenizer.pad_token_id).sum(dim=-1)
-        
-        return current_log_probs, old_log_probs
+        per_token_logps = get_per_token_logps(logits, input_ids) # Shape: (B, L-1)
+        return per_token_logps
 
 if __name__ == "__main__":
-    model_id = "gpt2"
-    wrapper = CodeAgentWrapper(model_id)
-    
-    prompts = [
-        "What is the capital of France?",
-        "Who wrote 'Pride and Prejudice'?",
-        "Explain the theory of relativity."
+    model = CodeAgentWrapper("gpt2")
+
+    traces = [
+        ("What is the capital of France?", "The capital of France is Paris."),
+        ("Who wrote 'Pride and Prejudice'?", "Jane Austen wrote 'Pride and Prejudice'."),
     ]
-    completions = [
-        "The capital of France is Paris.",
-        "Jane Austen wrote 'Pride and Prejudice'.",
-        "The theory of relativity was developed by Albert Einstein."
-    ]
-    
-    pi_old = wrapper 
-    log_probs, old_log_probs = wrapper.get_log_probs(pi_old, prompts, completions)
-    
+    input_ids, completion_mask = build_input_and_completion_mask(traces, model.tokenizer)
+    log_probs = model.get_log_probs(input_ids)
+
+    print("Log probabilities shape:", log_probs.shape)
     print("Log probabilities:", log_probs)
-    print("Old log probabilities:", old_log_probs)
