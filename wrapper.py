@@ -42,7 +42,7 @@ if __name__ == "__main__":
         ("Who wrote 'Pride and Prejudice'?", "Jane Austen wrote 'Pride and Prejudice'."),
     ]
     input_ids, completion_mask = build_input_and_completion_mask(traces, model.tokenizer)
-    log_probs = model.get_log_probs(input_ids, completion_mask)
+    log_probs = model.get_log_probs(input_ids)
 
     print("Log probabilities shape:", log_probs.shape)
     print("Log probabilities:", log_probs)
