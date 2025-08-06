@@ -27,6 +27,9 @@ def compute_advantanges(rewards, completion_lengths):
 
 
 def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, traces, advantages, epsilon, beta):
+    """
+    GRPO objective function as described in Equation 3 but return the loss instead of the gain.
+    """
     device = pi_theta_log_probs.device
     N, T = pi_theta_log_probs.shape
 
@@ -44,13 +47,11 @@ def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, traces, advantages, epsilon,
     # Equation 4: (pi_ref / pi_theta) - log(pi_ref / pi_theta) - 1
     log_kl_ratio = pi_ref_log_probs - pi_theta_log_probs  # log(pi_ref) - log(pi_theta) = log(pi_ref / pi_theta)
     kl_ratio = torch.exp(log_kl_ratio)  # exp(log(pi_ref / pi_theta)) = pi_ref / pi_theta
-    kl_token = kl_ratio - log_kl_ratio - 1.0  # shape: (N, T)
-    kl_term = kl_token.sum(dim=-1)  # shape: (N,)
+    kl_term = kl_ratio - log_kl_ratio - 1.0  # shape: (N, T)
 
-    # Completion-level loss
-    completion_loss = -(policy_gain.sum(dim=-1) - beta * kl_term)  # shape: (N,)
-
-    return completion_loss.mean()
+    # Token-level loss
+    loss = -(policy_gain - beta * kl_term)  # shape: (N, T)
+    return loss.mean() # scalar loss value
 
 def update_policy(pi_theta, loss):
     pass
