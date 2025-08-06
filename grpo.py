@@ -26,13 +26,10 @@ def compute_advantanges(rewards, completion_lengths):
     return advantages
 
 
-def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, traces, advantages, epsilon, beta):
+def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta):
     """
     GRPO objective function as described in Equation 3 but return the loss instead of the gain.
     """
-    device = pi_theta_log_probs.device
-    N, T = pi_theta_log_probs.shape
-
     # Clipped surrogate gain
     log_ratio = pi_theta_log_probs - pi_ref_log_probs  # log(pi_theta) - log(pi_ref) = log(pi_theta / pi_ref)
     ratio = torch.exp(log_ratio)  # exp(log(pi_theta / pi_ref)) = pi_theta / pi_ref
@@ -81,7 +78,6 @@ def train_grpo(
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_log_probs,
                 pi_ref_log_probs=pi_ref_log_probs,
-                traces=traces,
                 advantages=advantages,
                 epsilon=config["epsilon"],
                 beta=config["beta"]
