@@ -9,7 +9,7 @@ def update_policy(pi_theta, loss):
     return pi_theta
 
 
-def grpo_step(
+def grpo_step_for_one_trace(
         initial_policy: Policy,
         trace: list[tuple[str, str]],
         reward_function: callable,
@@ -58,7 +58,7 @@ if __name__ == "__main__":
         "beta": 0.04, # KL divergence penalty coefficient
         "mu": 1, # Number of GRPO optimization steps per batch
     }
-    new_policy = grpo_step(
+    new_policy = grpo_step_for_one_trace(
         initial_policy=initial_policy,
         trace=trace,
         reward_function=compute_reward,
