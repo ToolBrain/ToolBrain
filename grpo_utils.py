@@ -26,8 +26,8 @@ def build_input_and_completion_mask(traces, tokenizer):
     for prompt, completion in traces:
         prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
         completion_ids = tokenizer.encode(completion, add_special_tokens=False)
-
         all_input_ids.extend(prompt_ids + completion_ids)
+        
         completion_mask = [0] * len(prompt_ids) + [1] * len(completion_ids)
         all_completion_mask.extend(completion_mask)
 

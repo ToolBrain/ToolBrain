@@ -21,7 +21,7 @@ def compute_advantanges(traces, rewards, tokenizer):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     completion_lengths = [len(tokenizer.encode(completion, add_special_tokens=False)) for _, completion in traces]
 
-    r = torch.tensor(rewards, dtype=torch.float32, device=device)
+    r = rewards.detach().clone().to(dtype=torch.float32, device=device)
     mean = r.mean()
     std = r.std(unbiased=False)
     normalized_r = (r - mean) / (std + 1e-8)
@@ -40,6 +40,7 @@ def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta, c
     # Clipped surrogate gain
     log_ratio = pi_theta_log_probs - pi_ref_log_probs  # log(pi_theta) - log(pi_ref) = log(pi_theta / pi_ref)
     ratio = torch.exp(log_ratio)  # exp(log(pi_theta / pi_ref)) = pi_theta / pi_ref
+    
     unclipped = ratio * advantages  # shape: (N, T)
 
     clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
@@ -72,34 +73,35 @@ def train_grpo(
     pi_theta = copy_model(initial_policy)
 
     for _ in range(config["I"]):
-        rewards = reward_function(traces)
-        advantages = compute_advantanges(traces, rewards, pi_theta.tokenizer)
-        print("Advantages:", advantages.shape)
+        rewards = reward_function(traces) # Shape: (N,)
+        advantages = compute_advantanges(traces, rewards, pi_theta.tokenizer) # Shape: (N,)
 
-        # for _ in range(config["mu"]):
-        #     input_ids, completion_mask = build_input_and_completion_mask(traces, pi_theta.tokenizer)
+        for _ in range(config["mu"]):
+            input_ids, completion_mask = build_input_and_completion_mask(
+                traces=traces,
+                tokenizer=pi_theta.tokenizer
+            ) # Input_ids shape: (T,), completion_mask shape: (T,)
             
-        #     # Get log-probabilities from models
-        #     pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (B, L-1)
-        #     pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (B, L-1)
+            # Get log-probabilities from models
+            pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (T-1)
+            pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (T-1)
 
-        #     loss = grpo_loss(
-        #         pi_theta_log_probs=pi_theta_log_probs,
-        #         pi_ref_log_probs=pi_ref_log_probs,
-        #         advantages=advantages,
-        #         epsilon=config["epsilon"],
-        #         beta=config["beta"],
-        #         completion_mask=completion_mask
-        #     )
-        #     pi_theta = update_policy(pi_theta, loss)
+            loss = grpo_loss(
+                pi_theta_log_probs=pi_theta_log_probs,
+                pi_ref_log_probs=pi_ref_log_probs,
+                advantages=advantages,
+                epsilon=config["epsilon"],
+                beta=config["beta"],
+                completion_mask=completion_mask
+            )
+            # pi_theta = update_policy(pi_theta, loss)
 
     return pi_theta
 
 
 if __name__ == "__main__":
-    import random
     def compute_reward(traces):
-        return [random.uniform(0, 1) for _ in traces]
+        return torch.rand(len(traces), dtype=torch.float32)
 
     initial_policy = CodeAgentWrapper("gpt2")
     traces = [
