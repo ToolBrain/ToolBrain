@@ -23,15 +23,15 @@ class CodeAgentWrapper(nn.Module):
 
         self.model = AutoModelForCausalLM.from_pretrained(model_id)
 
-    def get_log_probs(self, input_ids: torch.Tensor, completion_mask: torch.Tensor):
+    def get_log_probs(self, input_ids: torch.Tensor):
         logits = self.model(input_ids.unsqueeze(0)).logits  # (B, L, V)
-        #logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
+        logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
         
         input_ids = input_ids.unsqueeze(0)  # (B, L), add batch dimension
-        #input_ids = input_ids[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
+        input_ids = input_ids[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
         
-        per_token_logps = get_per_token_logps(logits, input_ids).squeeze(0) # Shape: (L-1)
-        per_token_logps = per_token_logps[completion_mask==1.0] # Only keep log probabilities for completion tokens
+        per_token_logps = get_per_token_logps(logits, input_ids).squeeze(0) # Shape: (L)
+        # per_token_logps = per_token_logps[completion_mask==1.0] # Only keep log probabilities for completion tokens
         return per_token_logps
 
 if __name__ == "__main__":

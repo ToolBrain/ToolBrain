@@ -20,7 +20,6 @@ def compute_advantanges(traces, rewards, tokenizer):
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     completion_lengths = [len(tokenizer.encode(completion, add_special_tokens=False)) for _, completion in traces]
-
     r = rewards.detach().clone().to(dtype=torch.float32, device=device)
     mean = r.mean()
     std = r.std(unbiased=False)
@@ -40,7 +39,6 @@ def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta, c
     # Clipped surrogate gain
     log_ratio = pi_theta_log_probs - pi_ref_log_probs  # log(pi_theta) - log(pi_ref) = log(pi_theta / pi_ref)
     ratio = torch.exp(log_ratio)  # exp(log(pi_theta / pi_ref)) = pi_theta / pi_ref
-    
     unclipped = ratio * advantages  # shape: (N, T)
 
     clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
@@ -83,8 +81,10 @@ def train_grpo(
             ) # Input_ids shape: (T,), completion_mask shape: (T,)
             
             # Get log-probabilities from models
-            pi_theta_log_probs = pi_theta.get_log_probs(input_ids, completion_mask)  # shape: (T_completion,)
-            pi_ref_log_probs = initial_policy.get_log_probs(input_ids, completion_mask)  # shape: (T_completion,)
+            pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (T-1,)
+            pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (T-1,)
+
+
 
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_log_probs,
