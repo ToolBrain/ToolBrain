@@ -25,44 +25,32 @@ def compute_advantanges(rewards, completion_lengths):
         advantages.extend([norm_r_i] * length)
     return advantages
 
+
 def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, traces, advantages, epsilon, beta):
-    """
-    Implement Equation 3 for a batch of traces.
-    """
     device = pi_theta_log_probs.device
-    trace_map = torch.arange(len(traces), device=device)
-
-    # Compute sum of log-probs per completion
-    pi_theta_log_probs_sum = pi_theta_log_probs.sum(dim=-1)
-    pi_ref_log_probs_sum = pi_ref_log_probs.sum(dim=-1)
-
-    # Probability ratios
-    ratio = torch.exp(pi_theta_log_probs_sum - pi_ref_log_probs_sum)
-    A_per_completion = advantages  # map back to each completion
+    N, T = pi_theta_log_probs.shape
 
     # Clipped surrogate gain
-    clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
-    policy_gain = torch.min(ratio * A_per_completion, clipped_ratio * A_per_completion)
+    log_ratio = pi_theta_log_probs - pi_ref_log_probs  # log(pi_theta) - log(pi_ref) = log(pi_theta / pi_ref)
+    ratio = torch.exp(log_ratio)  # exp(log(pi_theta / pi_ref)) = pi_theta / pi_ref
+    unclipped = ratio * advantages  # shape: (N, T)
 
-    # KL regularization (Equation 4)
+    clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
+    clipped = clipped_ratio * advantages  # shape: (N, T)
+
+    policy_gain = torch.min(unclipped, clipped)  # shape: (N, T)
+
+    # KL divergence (Equation 4)
     # Equation 4: (pi_ref / pi_theta) - log(pi_ref / pi_theta) - 1
-    kl_ratio = torch.exp(log_ratio) # exp(log(pi_ref / pi_theta)) = pi_ref / pi_theta
-    log_ratio = pi_ref_log_probs - pi_theta_log_probs  # log(pi_ref / pi_theta) = log(pi_ref) - log(pi_theta)
-    kl_term = (kl_ratio - log_ratio - 1.0).sum(dim=-1)  # shape: (N,)
+    log_kl_ratio = pi_ref_log_probs - pi_theta_log_probs  # log(pi_ref) - log(pi_theta) = log(pi_ref / pi_theta)
+    kl_ratio = torch.exp(log_kl_ratio)  # exp(log(pi_ref / pi_theta)) = pi_ref / pi_theta
+    kl_token = kl_ratio - log_kl_ratio - 1.0  # shape: (N, T)
+    kl_term = kl_token.sum(dim=-1)  # shape: (N,)
 
     # Completion-level loss
-    completion_loss = -(policy_gain - beta * kl_term)
+    completion_loss = -(policy_gain.sum(dim=-1) - beta * kl_term)  # shape: (N,)
 
-    trace_losses = torch.zeros(len(traces), device=device)
-    trace_counts = torch.zeros(len(traces), device=device)
-
-    for i, loss in enumerate(completion_loss):
-        trace_idx = trace_map[i]
-        trace_losses[trace_idx] += loss
-        trace_counts[trace_idx] += 1
-
-    trace_losses = trace_losses / trace_counts.clamp(min=1.0)
-    return trace_losses.mean()
+    return completion_loss.mean()
 
 def update_policy(pi_theta, loss):
     pass
@@ -75,7 +63,6 @@ def train_grpo(
         reward_function,
         config,
 ):
-    # pi_theta is the updated policy model, pi_old is the initial policy model.
     pi_theta = copy_model(initial_policy)
 
     for _ in range(config["I"]):
