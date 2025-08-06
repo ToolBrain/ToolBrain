@@ -1,5 +1,14 @@
-from transformers import AutoTokenizer
+import random
+from copy import deepcopy
 import torch
+from transformers import AutoTokenizer
+
+
+def copy_model(model):
+    return model.copy() if hasattr(model, 'copy') else deepcopy(model)
+
+def sample_batch(dataset, batch_size=4):
+    return random.sample(dataset, batch_size)
 
 def build_input_and_completion_mask(pairs, tokenizer):
     """

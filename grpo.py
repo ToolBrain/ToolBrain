@@ -1,16 +1,10 @@
 # Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
 
-import random
-from copy import deepcopy
+
 import torch
 from wrapper import CodeAgentWrapper
+from grpo_utils import *
 
-
-def copy_model(model):
-    return model.copy() if hasattr(model, 'copy') else deepcopy(model)
-
-def sample_batch(dataset, batch_size=4):
-    return random.sample(dataset, batch_size)
 
 # Outcome supervision
 # Calculate advantages for the entire output as described in section 4.1.2
@@ -24,6 +18,34 @@ def compute_advantanges(rewards, completion_lengths):
     for norm_r_i, length in zip(normalized_r, completion_lengths):
         advantages.extend([norm_r_i] * length)
     return advantages
+
+
+def build_input_and_completion_mask(pairs, tokenizer):
+    """
+    Args:
+        pairs: List of (prompt: str, completion: str) tuples.
+        tokenizer: A HuggingFace tokenizer (already loaded).
+    
+    Returns:
+        input_ids: torch.LongTensor [total_seq_len]
+        completion_mask: torch.BoolTensor [total_seq_len]
+    """
+    all_input_ids = []
+    all_completion_mask = []
+
+    for prompt, completion in pairs:
+        prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
+        completion_ids = tokenizer.encode(completion, add_special_tokens=False)
+
+        all_input_ids.extend(prompt_ids + completion_ids)
+        completion_mask = [0] * len(prompt_ids) + [1] * len(completion_ids)
+        all_completion_mask.extend(completion_mask)
+
+    input_ids = torch.tensor(all_input_ids, dtype=torch.long)
+    completion_mask = torch.tensor(all_completion_mask, dtype=torch.bool)
+
+    return input_ids, completion_mask
+
 
 
 def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta):
@@ -50,6 +72,7 @@ def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta):
     loss = -(policy_gain - beta * kl_term)  # shape: (N, T)
     return loss.mean() # scalar loss value
 
+
 def update_policy(pi_theta, loss):
     pass
 
@@ -75,6 +98,7 @@ def train_grpo(
             pi_theta_log_probs, pi_ref_log_probs = pi_theta.get_log_probs(
                 initial_policy, prompts, completions
             )  # shape: (N, T)
+
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_log_probs,
                 pi_ref_log_probs=pi_ref_log_probs,
@@ -97,11 +121,10 @@ if __name__ == "__main__":
 
     initial_policy = CodeAgentWrapper("gpt2")
     traces = [
-        {"prompt": "What is 7 + 6?", "completion": "13"},
-        {"prompt": "Which number is greater: 12 or 9?", "completion": "12"},
-        {"prompt": "Is 10 an even number?", "completion": "Yes"},
-        {"prompt": "What is the square of 5?", "completion": "25"},
-        {"prompt": "What is the next number after 99?", "completion": "100"}
+        ("What is 7 + 6?", "13"),
+        ("Which number is greater: 12 or 9?", "12"),
+        ("Sum all number from 1 to 10", "55"),
+        ("What is the capital of France?", "Paris"),
     ]
     config = {
         "epsilon": 0.2, # clipping parameter
