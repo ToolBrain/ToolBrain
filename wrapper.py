@@ -23,15 +23,16 @@ class CodeAgentWrapper(nn.Module):
 
         self.model = AutoModelForCausalLM.from_pretrained(model_id)
 
-    def get_log_probs(self, input_ids: torch.Tensor):
+    def get_log_probs(self, input_ids: torch.Tensor, completion_mask: torch.Tensor):
         logits = self.model(input_ids.unsqueeze(0)).logits  # (B, L, V)
-        logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
+        #logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
         
         input_ids = input_ids.unsqueeze(0)  # (B, L), add batch dimension
-        input_ids = input_ids[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
+        #input_ids = input_ids[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
         
-        per_token_logps = get_per_token_logps(logits, input_ids) # Shape: (B, L-1)
-        return per_token_logps.squeeze(0)  # Remove batch dimension, shape: (L-1,)
+        per_token_logps = get_per_token_logps(logits, input_ids).squeeze(0) # Shape: (L-1)
+        per_token_logps = per_token_logps[completion_mask==1.0] # Only keep log probabilities for completion tokens
+        return per_token_logps
 
 if __name__ == "__main__":
     model = CodeAgentWrapper("gpt2")
@@ -41,7 +42,7 @@ if __name__ == "__main__":
         ("Who wrote 'Pride and Prejudice'?", "Jane Austen wrote 'Pride and Prejudice'."),
     ]
     input_ids, completion_mask = build_input_and_completion_mask(traces, model.tokenizer)
-    log_probs = model.get_log_probs(input_ids)
+    log_probs = model.get_log_probs(input_ids, completion_mask)
 
     print("Log probabilities shape:", log_probs.shape)
     print("Log probabilities:", log_probs)

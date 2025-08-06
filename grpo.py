@@ -83,8 +83,8 @@ def train_grpo(
             ) # Input_ids shape: (T,), completion_mask shape: (T,)
             
             # Get log-probabilities from models
-            pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (T-1)
-            pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (T-1)
+            pi_theta_log_probs = pi_theta.get_log_probs(input_ids, completion_mask)  # shape: (T_completion,)
+            pi_ref_log_probs = initial_policy.get_log_probs(input_ids, completion_mask)  # shape: (T_completion,)
 
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_log_probs,
@@ -94,7 +94,7 @@ def train_grpo(
                 beta=config["beta"],
                 completion_mask=completion_mask
             )
-            # pi_theta = update_policy(pi_theta, loss)
+            pi_theta = update_policy(pi_theta, loss)
 
     return pi_theta
 
