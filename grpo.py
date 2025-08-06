@@ -1,3 +1,5 @@
+# Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
+
 import random
 from copy import deepcopy
 import torch
@@ -10,7 +12,8 @@ def copy_model(model):
 def sample_batch(dataset, batch_size=4):
     return random.sample(dataset, batch_size)
 
-# Outcome supervision (for the entire output)
+# Outcome supervision
+# Calculate advantages for the entire output as described in section 4.1.2
 def compute_advantanges(rewards, completion_lengths):
     r = torch.tensor(rewards, dtype=torch.float32)
     mean = r.mean()
