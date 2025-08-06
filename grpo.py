@@ -20,7 +20,7 @@ def compute_advantanges(rewards, completion_lengths):
     return advantages
 
 
-def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta):
+def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta, completion_mask):
     """
     GRPO objective function as described in Equation 3 but return the loss instead of the gain.
     """
@@ -41,13 +41,13 @@ def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta):
     kl_term = kl_ratio - log_kl_ratio - 1.0  # shape: (N, T)
 
     # Token-level loss
-    loss = -(policy_gain - beta * kl_term)  # shape: (N, T)
-    return loss.mean() # scalar loss value
+    per_token_loss = -(policy_gain - beta * kl_term)  # shape: (N, T)
+    loss = ((per_token_loss * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)).mean()
+    return loss # scalar loss value
 
 
 def update_policy(pi_theta, loss):
     pass
-
 
 
 def train_grpo(
@@ -63,20 +63,16 @@ def train_grpo(
         advantages = compute_advantanges(rewards)
 
         for _ in range(config["mu"]):
-            prompts = [p['prompt'] for p in traces]
-            completions = [p['completion'] for p in traces]
-
             # Get log-probabilities from models
-            pi_theta_log_probs, pi_ref_log_probs = pi_theta.get_log_probs(
-                initial_policy, prompts, completions
-            )  # shape: (N, T)
-
+            pi_theta_log_probs, pi_theta_completion_mask = pi_theta.get_log_probs(traces)  # shape: (N, T)
+            pi_ref_log_probs, pi_ref_completion_mask = initial_policy.get_log_probs(traces)  # shape: (N, T)
+            
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_log_probs,
                 pi_ref_log_probs=pi_ref_log_probs,
                 advantages=advantages,
                 epsilon=config["epsilon"],
-                beta=config["beta"]
+                beta=config["beta"],
             )
             pi_theta = update_policy(pi_theta, loss)
 
