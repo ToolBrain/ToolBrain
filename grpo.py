@@ -16,18 +16,20 @@ def compute_advantanges(traces, rewards, tokenizer):
         rewards: List of rewards for each trace.
         tokenizer: A HuggingFace tokenizer (already loaded).
     Returns:
-        advantages: List of advantages for each token in the completions.
+        advantages: A torch tensor of shape (N,) where N is the total number of completion tokens.
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     completion_lengths = [len(tokenizer.encode(completion, add_special_tokens=False)) for _, completion in traces]
-    
-    r = torch.tensor(rewards, dtype=torch.float32)
+
+    r = torch.tensor(rewards, dtype=torch.float32, device=device)
     mean = r.mean()
     std = r.std(unbiased=False)
     normalized_r = (r - mean) / (std + 1e-8)
 
-    advantages = []
-    for norm_r_i, length in zip(normalized_r, completion_lengths):
-        advantages.extend([norm_r_i] * length)
+    advantages = torch.cat([
+        normalized_r[i].repeat(length)
+        for i, length in enumerate(completion_lengths)
+    ])
     return advantages
 
 
@@ -72,23 +74,24 @@ def train_grpo(
     for _ in range(config["I"]):
         rewards = reward_function(traces)
         advantages = compute_advantanges(traces, rewards, pi_theta.tokenizer)
+        print("Advantages:", advantages.shape)
 
-        for _ in range(config["mu"]):
-            input_ids, completion_mask = build_input_and_completion_mask(traces, pi_theta.tokenizer)
+        # for _ in range(config["mu"]):
+        #     input_ids, completion_mask = build_input_and_completion_mask(traces, pi_theta.tokenizer)
             
-            # Get log-probabilities from models
-            pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (B, L-1)
-            pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (B, L-1)
+        #     # Get log-probabilities from models
+        #     pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (B, L-1)
+        #     pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (B, L-1)
 
-            loss = grpo_loss(
-                pi_theta_log_probs=pi_theta_log_probs,
-                pi_ref_log_probs=pi_ref_log_probs,
-                advantages=advantages,
-                epsilon=config["epsilon"],
-                beta=config["beta"],
-                completion_mask=completion_mask
-            )
-            pi_theta = update_policy(pi_theta, loss)
+        #     loss = grpo_loss(
+        #         pi_theta_log_probs=pi_theta_log_probs,
+        #         pi_ref_log_probs=pi_ref_log_probs,
+        #         advantages=advantages,
+        #         epsilon=config["epsilon"],
+        #         beta=config["beta"],
+        #         completion_mask=completion_mask
+        #     )
+        #     pi_theta = update_policy(pi_theta, loss)
 
     return pi_theta
 
