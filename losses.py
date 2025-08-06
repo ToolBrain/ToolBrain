@@ -9,7 +9,7 @@ def grpo_loss(
         completion_mask: torch.Tensor
 ) -> torch.Tensor:
     """
-    Computes the GRPO loss function as defined in Equation (3) of the DeepSeekMath paper.
+    Computes the GRPO loss function as defined in Equation (3) of the DeepSeekMath paper at https://arxiv.org/pdf/2402.03300
     This implementation returns the negative of the original gain (objective) for optimization via gradient descent.
     """
 
