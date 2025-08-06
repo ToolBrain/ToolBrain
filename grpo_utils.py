@@ -10,10 +10,10 @@ def copy_model(model):
 def sample_batch(dataset, batch_size=4):
     return random.sample(dataset, batch_size)
 
-def build_input_and_completion_mask(pairs, tokenizer):
+def build_input_and_completion_mask(traces, tokenizer):
     """
     Args:
-        pairs: List of (prompt: str, completion: str) tuples.
+        traces: List of (prompt: str, completion: str) tuples.
         tokenizer: A HuggingFace tokenizer (already loaded).
     
     Returns:
@@ -23,7 +23,7 @@ def build_input_and_completion_mask(pairs, tokenizer):
     all_input_ids = []
     all_completion_mask = []
 
-    for prompt, completion in pairs:
+    for prompt, completion in traces:
         prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
         completion_ids = tokenizer.encode(completion, add_special_tokens=False)
 
@@ -37,16 +37,17 @@ def build_input_and_completion_mask(pairs, tokenizer):
     return input_ids, completion_mask
 
 if __name__ == "__main__":
-    # Example usage
     tokenizer = AutoTokenizer.from_pretrained("gpt2")
 
-    pairs = [
+    traces = [
         ("What is the capital of France?", " Paris."),
         ("2 + 2 equals", " 4."),
     ]
 
-    input_ids, completion_mask = build_input_and_completion_mask(pairs, tokenizer)
+    input_ids, completion_mask = build_input_and_completion_mask(traces, tokenizer)
 
     print("Input IDs:", input_ids)
+    print("Shape of input_ids:", input_ids.shape)
     print("Completion Mask:", completion_mask)
+    print("Shape of completion_mask:", completion_mask.shape)
     print("Decoded:", tokenizer.decode(input_ids))
