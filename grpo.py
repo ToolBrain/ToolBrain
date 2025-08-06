@@ -1,60 +1,33 @@
 # Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
 
-
 import torch
 from wrapper import CodeAgentWrapper
 from grpo_utils import *
-
-
-# Outcome supervision
-# Calculate advantages for the entire output as described in section 4.1.2
-def compute_advantanges(traces, rewards, tokenizer):
-    """
-    Computes advantages from traces.
-    Args:
-        traces: List of (prompt: str, completion: str) tuples.
-        rewards: List of rewards for each trace.
-        tokenizer: A HuggingFace tokenizer (already loaded).
-    Returns:
-        advantages: A torch tensor of shape (N,) where N is the total number of completion tokens.
-    """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    completion_lengths = [len(tokenizer.encode(completion, add_special_tokens=False)) for _, completion in traces]
-    r = rewards.detach().clone().to(dtype=torch.float32, device=device)
-    mean = r.mean()
-    std = r.std(unbiased=False)
-    normalized_r = (r - mean) / (std + 1e-8)
-
-    advantages = torch.cat([
-        normalized_r[i].repeat(length)
-        for i, length in enumerate(completion_lengths)
-    ])
-    return advantages
-
 
 def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta, completion_mask):
     """
     GRPO objective function as described in Equation 3 but return the loss instead of the gain.
     """
+
     # Clipped surrogate gain
     log_ratio = pi_theta_log_probs - pi_ref_log_probs  # log(pi_theta) - log(pi_ref) = log(pi_theta / pi_ref)
     ratio = torch.exp(log_ratio)  # exp(log(pi_theta / pi_ref)) = pi_theta / pi_ref
-    unclipped = ratio * advantages  # shape: (N, T)
+    unclipped = ratio * advantages  # shape: (T,)
 
     clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
-    clipped = clipped_ratio * advantages  # shape: (N, T)
+    clipped = clipped_ratio * advantages  # shape: (T,)
 
-    policy_gain = torch.min(unclipped, clipped)  # shape: (N, T)
+    policy_gain = torch.min(unclipped, clipped)  # shape: (T,)
 
     # KL divergence (Equation 4)
     # Equation 4: (pi_ref / pi_theta) - log(pi_ref / pi_theta) - 1
     log_kl_ratio = pi_ref_log_probs - pi_theta_log_probs  # log(pi_ref) - log(pi_theta) = log(pi_ref / pi_theta)
     kl_ratio = torch.exp(log_kl_ratio)  # exp(log(pi_ref / pi_theta)) = pi_ref / pi_theta
-    kl_term = kl_ratio - log_kl_ratio - 1.0  # shape: (N, T)
+    kl_term = kl_ratio - log_kl_ratio - 1.0  # shape: (T,)
 
     # Token-level loss
-    per_token_loss = -(policy_gain - beta * kl_term)  # shape: (N, T)
-    loss = ((per_token_loss * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)).mean()
+    per_token_loss = -(policy_gain - beta * kl_term)  # shape: (T,)
+    loss = (per_token_loss * completion_mask).sum() / completion_mask.sum()
     return loss # scalar loss value
 
 
@@ -64,60 +37,64 @@ def update_policy(pi_theta, loss):
 
 def train_grpo(
         initial_policy,
-        traces,
+        trace,
         reward_function,
         config,
 ):
     pi_theta = copy_model(initial_policy)
 
-    for _ in range(config["I"]):
-        rewards = reward_function(traces) # Shape: (N,)
-        advantages = compute_advantanges(traces, rewards, pi_theta.tokenizer) # Shape: (N,)
+    input_ids, completion_mask, rewards, advantages = build_inputs(
+        trace=trace,
+        tokenizer=pi_theta.tokenizer,
+        reward_function=reward_function,
+    ) # Input_ids shape: (T,), completion_mask shape: (T,), rewards shape: (T,)
 
-        for _ in range(config["mu"]):
-            input_ids, completion_mask = build_input_and_completion_mask(
-                traces=traces,
-                tokenizer=pi_theta.tokenizer
-            ) # Input_ids shape: (T,), completion_mask shape: (T,)
-            
-            # Get log-probabilities from models
-            pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (T-1,)
-            pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (T-1,)
+    print(f"Input IDs shape: {input_ids.shape}, Completion Mask shape: {completion_mask.shape}")
+    print(f"Rewards shape: {rewards.shape}, Rewards: {rewards}")
+    print(f"Advantages shape: {advantages.shape}, Advantages: {advantages}")
 
+    for _ in range(config["mu"]):
 
+        # Get log-probabilities from models
+        pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (T,)
+        pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (T,)
 
-            loss = grpo_loss(
-                pi_theta_log_probs=pi_theta_log_probs,
-                pi_ref_log_probs=pi_ref_log_probs,
-                advantages=advantages,
-                epsilon=config["epsilon"],
-                beta=config["beta"],
-                completion_mask=completion_mask
-            )
-            pi_theta = update_policy(pi_theta, loss)
+        print(f"Pi_theta log probs shape: {pi_theta_log_probs.shape}, Pi_ref log probs shape: {pi_ref_log_probs.shape}")
+        print(f"Pi_theta log probs: {pi_theta_log_probs}")
+        print(f"Pi_ref log probs: {pi_ref_log_probs}")
+
+        loss = grpo_loss(
+            pi_theta_log_probs=pi_theta_log_probs,
+            pi_ref_log_probs=pi_ref_log_probs,
+            advantages=advantages,
+            epsilon=config["epsilon"],
+            beta=config["beta"],
+            completion_mask=completion_mask
+        )
+        pi_theta = update_policy(pi_theta, loss)
 
     return pi_theta
 
 
 if __name__ == "__main__":
-    def compute_reward(traces):
-        return torch.rand(len(traces), dtype=torch.float32)
+    def compute_reward(prompt, completion):
+        return torch.rand(1, dtype=torch.float32).item()
 
     initial_policy = CodeAgentWrapper("gpt2")
-    traces = [
+    trace = [
         ("What is 7 + 6?", "13"),
         ("Which number is greater: 12 or 9?", "12"),
     ]
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
-        "mu": 2, # Number of GRPO optimization steps per batch
+        "mu": 1, # Number of GRPO optimization steps per batch
         "I": 1, # Number of policy updates
         "M": 1, # Number of batches per iteration
     }
     new_policy = train_grpo(
         initial_policy=initial_policy,
-        traces=traces,
+        trace=trace,
         reward_function=compute_reward,
         config=config
     )

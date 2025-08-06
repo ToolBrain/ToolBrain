@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from grpo_utils import build_input_and_completion_mask
+from grpo_utils import build_inputs
 
 
 def get_per_token_logps(logits, input_ids):
@@ -14,6 +14,7 @@ def get_per_token_logps(logits, input_ids):
     return torch.stack(per_token_logps)
 
 class CodeAgentWrapper(nn.Module):
+    # Lay tu smolagent
     def __init__(self, model_id):
         super().__init__()
 
@@ -41,7 +42,7 @@ if __name__ == "__main__":
         ("What is the capital of France?", "The capital of France is Paris."),
         ("Who wrote 'Pride and Prejudice'?", "Jane Austen wrote 'Pride and Prejudice'."),
     ]
-    input_ids, completion_mask = build_input_and_completion_mask(traces, model.tokenizer)
+    input_ids, _, _, _ = build_inputs(traces, model.tokenizer, reward_function=lambda p, c: 1.0)
     log_probs = model.get_log_probs(input_ids)
 
     print("Log probabilities shape:", log_probs.shape)
