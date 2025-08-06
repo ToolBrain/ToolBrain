@@ -8,7 +8,18 @@ from grpo_utils import *
 
 # Outcome supervision
 # Calculate advantages for the entire output as described in section 4.1.2
-def compute_advantanges(rewards, completion_lengths):
+def compute_advantanges(traces, rewards, tokenizer):
+    """
+    Computes advantages from traces.
+    Args:
+        traces: List of (prompt: str, completion: str) tuples.
+        rewards: List of rewards for each trace.
+        tokenizer: A HuggingFace tokenizer (already loaded).
+    Returns:
+        advantages: List of advantages for each token in the completions.
+    """
+    completion_lengths = [len(tokenizer.encode(completion, add_special_tokens=False)) for _, completion in traces]
+    
     r = torch.tensor(rewards, dtype=torch.float32)
     mean = r.mean()
     std = r.std(unbiased=False)
@@ -47,7 +58,7 @@ def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, advantages, epsilon, beta, c
 
 
 def update_policy(pi_theta, loss):
-    pass
+    return pi_theta
 
 
 def train_grpo(
@@ -59,20 +70,23 @@ def train_grpo(
     pi_theta = copy_model(initial_policy)
 
     for _ in range(config["I"]):
-        rewards = [reward_function(trace) for trace in traces]
-        advantages = compute_advantanges(rewards)
+        rewards = reward_function(traces)
+        advantages = compute_advantanges(traces, rewards, pi_theta.tokenizer)
 
         for _ in range(config["mu"]):
-            # Get log-probabilities from models
-            pi_theta_log_probs, pi_theta_completion_mask = pi_theta.get_log_probs(traces)  # shape: (N, T)
-            pi_ref_log_probs, pi_ref_completion_mask = initial_policy.get_log_probs(traces)  # shape: (N, T)
+            input_ids, completion_mask = build_input_and_completion_mask(traces, pi_theta.tokenizer)
             
+            # Get log-probabilities from models
+            pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (B, L-1)
+            pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (B, L-1)
+
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_log_probs,
                 pi_ref_log_probs=pi_ref_log_probs,
                 advantages=advantages,
                 epsilon=config["epsilon"],
                 beta=config["beta"],
+                completion_mask=completion_mask
             )
             pi_theta = update_policy(pi_theta, loss)
 
@@ -80,26 +94,21 @@ def train_grpo(
 
 
 if __name__ == "__main__":
-    def get_groundtruth(prompt):
-        return "ground_truth_answer_for_" + prompt
-
-    def compute_reward(prompt, completion):
-        ground_truth = get_groundtruth(prompt)
-        return 1.0 if completion == ground_truth else 0.0
+    import random
+    def compute_reward(traces):
+        return [random.uniform(0, 1) for _ in traces]
 
     initial_policy = CodeAgentWrapper("gpt2")
     traces = [
         ("What is 7 + 6?", "13"),
         ("Which number is greater: 12 or 9?", "12"),
-        ("Sum all number from 1 to 10", "55"),
-        ("What is the capital of France?", "Paris"),
     ]
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
         "mu": 2, # Number of GRPO optimization steps per batch
-        "I": 3, # Number of policy updates
-        "M": 4, # Number of batches per iteration
+        "I": 1, # Number of policy updates
+        "M": 1, # Number of batches per iteration
     }
     new_policy = train_grpo(
         initial_policy=initial_policy,
