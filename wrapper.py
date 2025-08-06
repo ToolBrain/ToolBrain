@@ -31,7 +31,7 @@ class CodeAgentWrapper(nn.Module):
         input_ids = input_ids[:, 1:]  # (B, L-1), exclude the first input ID since we don't have logits for it
         
         per_token_logps = get_per_token_logps(logits, input_ids) # Shape: (B, L-1)
-        return per_token_logps
+        return per_token_logps.squeeze(0)  # Remove batch dimension, shape: (L-1,)
 
 if __name__ == "__main__":
     model = CodeAgentWrapper("gpt2")
