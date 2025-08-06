@@ -42,10 +42,10 @@ def grpo_loss(pi_theta_log_probs, pi_old_log_probs, traces, advantages, epsilon,
     policy_gain = torch.min(ratio * A_per_completion, clipped_ratio * A_per_completion)
 
     # KL regularization (Equation 4)
-    # Equation 4: (pi_theta / pi_old) - log(pi_theta / pi_old) - 1
-    log_ratio = pi_theta_log_probs - pi_old_log_probs  # shape: (N, T)
-    kl_ratio = torch.exp(log_ratio)
-    kl_term = (kl_ratio - log_ratio - 1.0).sum(dim=-1)
+    # Equation 4: (pi_old / pi_theta) - log(pi_old / pi_theta) - 1
+    kl_ratio = torch.exp(log_ratio) # exp(log(pi_old / pi_theta)) = pi_old / pi_theta
+    log_ratio = pi_old_log_probs - pi_theta_log_probs  # log(pi_old / pi_theta) = log(pi_old) - log(pi_theta)
+    kl_term = (kl_ratio - log_ratio - 1.0).sum(dim=-1)  # shape: (N,)
 
     # Completion-level loss
     completion_loss = -(policy_gain - beta * kl_term)
