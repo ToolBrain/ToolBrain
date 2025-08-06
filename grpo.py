@@ -25,19 +25,19 @@ def compute_advantanges(rewards, completion_lengths):
         advantages.extend([norm_r_i] * length)
     return advantages
 
-def grpo_loss(pi_theta_log_probs, pi_old_log_probs, traces, advantages, epsilon, beta):
+def grpo_loss(pi_theta_log_probs, pi_ref_log_probs, traces, advantages, epsilon, beta):
     """
-    Implement Equation 3 for a batch of traces, but use pi_old for pi_ref for simplicity.
+    Implement Equation 3 for a batch of traces.
     """
     device = pi_theta_log_probs.device
     trace_map = torch.arange(len(traces), device=device)
 
     # Compute sum of log-probs per completion
     pi_theta_log_probs_sum = pi_theta_log_probs.sum(dim=-1)
-    pi_old_log_probs_sum = pi_old_log_probs.sum(dim=-1)
+    pi_ref_log_probs_sum = pi_ref_log_probs.sum(dim=-1)
 
     # Probability ratios
-    ratio = torch.exp(pi_theta_log_probs_sum - pi_old_log_probs_sum)
+    ratio = torch.exp(pi_theta_log_probs_sum - pi_ref_log_probs_sum)
     A_per_completion = advantages  # map back to each completion
 
     # Clipped surrogate gain
@@ -45,9 +45,9 @@ def grpo_loss(pi_theta_log_probs, pi_old_log_probs, traces, advantages, epsilon,
     policy_gain = torch.min(ratio * A_per_completion, clipped_ratio * A_per_completion)
 
     # KL regularization (Equation 4)
-    # Equation 4: (pi_old / pi_theta) - log(pi_old / pi_theta) - 1
-    kl_ratio = torch.exp(log_ratio) # exp(log(pi_old / pi_theta)) = pi_old / pi_theta
-    log_ratio = pi_old_log_probs - pi_theta_log_probs  # log(pi_old / pi_theta) = log(pi_old) - log(pi_theta)
+    # Equation 4: (pi_ref / pi_theta) - log(pi_ref / pi_theta) - 1
+    kl_ratio = torch.exp(log_ratio) # exp(log(pi_ref / pi_theta)) = pi_ref / pi_theta
+    log_ratio = pi_ref_log_probs - pi_theta_log_probs  # log(pi_ref / pi_theta) = log(pi_ref) - log(pi_theta)
     kl_term = (kl_ratio - log_ratio - 1.0).sum(dim=-1)  # shape: (N,)
 
     # Completion-level loss
@@ -87,12 +87,12 @@ def train_grpo(
             completions = [p['completion'] for p in traces]
 
             # Get log-probabilities from models
-            pi_theta_log_probs, pi_old_log_probs = pi_theta.get_log_probs(
+            pi_theta_log_probs, pi_ref_log_probs = pi_theta.get_log_probs(
                 initial_policy, prompts, completions
             )  # shape: (N, T)
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_log_probs,
-                pi_old_log_probs=pi_old_log_probs,
+                pi_ref_log_probs=pi_ref_log_probs,
                 traces=traces,
                 advantages=advantages,
                 epsilon=config["epsilon"],
