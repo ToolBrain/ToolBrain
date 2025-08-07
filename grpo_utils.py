@@ -90,14 +90,12 @@ class Policy(nn.Module):
         self.tokenizer = tokenizer
 
     def get_log_probs(self, input_ids: torch.Tensor) -> torch.Tensor:
-        # Shape of input_ids is (N,T)
         logits = self.llm(input_ids).logits  # (N, T, V)
         
         #logits = logits[:, :-1, :]  # (N, T-1, V), exclude the last logit: it corresponds to the next token pred
         #input_ids = input_ids[:, 1:]  # (N, T-1), exclude the first input ID since we don't have logits for it
         
         per_token_logps = get_per_token_logps(logits, input_ids).squeeze(0) # Shape: (N,T)
-        # per_token_logps = per_token_logps[completion_mask==1.0] # Only keep log probabilities for completion tokens
         return per_token_logps
 
 
