@@ -25,7 +25,6 @@ def grpo_step(
     ) # All have shape (N,T)
 
     for _ in range(config["mu"]):
-        # Get log-probabilities from models
         pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (N,T)
         pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (N,T)
 
@@ -51,14 +50,35 @@ if __name__ == "__main__":
     initial_policy = Policy(llm=llm, tokenizer=tokenizer)
     traces = [
         [
-            ("What is 7 + 6?", "13"),
-            ("Which number is greater: 12 or 9?", "12"),
+            (
+                "Thought: I can use a simple Python loop to iterate over the numbers from 1 to 10 and sum them up.",
+                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
+            ),
+            (
+                "Thought: The code snippet has successfully calculated the sum of numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
+                "Observation: Execution logs:\nLast output from code snippet:\n55"
+            )
         ],
         [
-            ("What is 7 + 6?", "13"),
-            ("Which number is greater: 12 or 9?", "12"),
+            (
+                "Thought: To sum all numbers from 1 to 10, I can use a simple loop in Python to iterate over the range of numbers and add them up. I will use the built-in `range` function to generate the numbers from 1 to 10, and a variable to keep track of the sum.",
+                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
+            ),
+            (
+                "Thought: The code snippet has successfully calculated the sum of all numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
+                "Observation: Execution logs:\nLast output from code snippet:\n55"
+            )
         ],
-
+        [
+            (
+                "Thought: To sum all numbers from 1 to 10, I can use a simple Python loop to iterate over the range of numbers and add them up. I will use the built-in `range` function to generate the numbers from 1 to 10, and then use a `for` loop to iterate over the range and add each number to a running total.",
+                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
+            ),
+            (
+                "Thought: The code snippet has successfully calculated the sum of numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
+                "Observation: Execution logs:\nLast output from code snippet:\n55"
+            )
+        ]
     ]
     
     config = {
