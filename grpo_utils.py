@@ -117,10 +117,10 @@ if __name__ == "__main__":
         ],
     ]
 
-    input_ids, completion_mask, rewards, advantages = build_inputs(
+    input_ids, completion_mask, advantages = build_inputs(
         traces=traces,
         tokenizer=tokenizer,
-        reward_function=lambda p, c: 1.0)
+        reward_function=lambda trace: 1.0)
 
     print("Input IDs:", input_ids)
     print("Shape of input_ids:", input_ids.shape)
