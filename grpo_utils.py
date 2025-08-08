@@ -34,12 +34,14 @@ def build_inputs(
     
     Returns:
         input_ids: torch.LongTensor [N, T]
+        attention_mask: torch.IntTensor [N, T]
         completion_mask: torch.IntTensor [N, T]
         advantages: torch.FloatTensor [N, T]
     """
     all_input_ids = []
     all_completion_mask = []
     all_rewards = []
+    all_attention_masks = []
 
     for trace in traces:
         input_ids_seq = []
@@ -58,9 +60,14 @@ def build_inputs(
         all_input_ids.append(input_ids_seq)
         all_completion_mask.append(completion_mask_seq)
         all_rewards.append(rewards_seq)
+        all_attention_masks.append([1] * len(input_ids_seq))
         
     input_ids = pad_sequence(
         [torch.tensor(seq, dtype=torch.long) for seq in all_input_ids],
+        batch_first=True
+    )
+    attention_mask = pad_sequence(
+        [torch.tensor(seq, dtype=torch.int) for seq in all_attention_masks],
         batch_first=True
     )
     completion_mask = pad_sequence(
@@ -73,7 +80,7 @@ def build_inputs(
     )
     advantages = compute_advantages(rewards)
 
-    return input_ids, completion_mask, advantages
+    return input_ids, attention_mask, completion_mask, advantages
 
 def get_per_token_logps(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
     per_token_logps = [] # Use a loop to reduce memory peak.
@@ -89,13 +96,13 @@ class Policy(nn.Module):
         self.llm = llm
         self.tokenizer = tokenizer
 
-    def get_log_probs(self, input_ids: torch.Tensor) -> torch.Tensor:
-        logits = self.llm(input_ids).logits  # (N, T, V)
+    def get_log_probs(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # (N, T, V)
         
         #logits = logits[:, :-1, :]  # (N, T-1, V), exclude the last logit: it corresponds to the next token pred
         #input_ids = input_ids[:, 1:]  # (N, T-1), exclude the first input ID since we don't have logits for it
         
-        per_token_logps = get_per_token_logps(logits, input_ids).squeeze(0) # Shape: (N,T)
+        per_token_logps = get_per_token_logps(logits, input_ids) # Shape: (N,T)
         return per_token_logps
 
 
@@ -106,28 +113,42 @@ if __name__ == "__main__":
 
     traces = [
         [
-            ("What is the capital of France?", "The capital of France is Paris."),
-            ("Who wrote 'Pride and Prejudice'?", "Jane Austen wrote 'Pride and Prejudice'."),
+            (
+                "Thought: I can use a simple Python loop to iterate over the numbers from 1 to 10 and sum them up.",
+                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
+            ),
+            (
+                "Thought: The code snippet has successfully calculated the sum of numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
+                "Observation: Execution logs:\nLast output from code snippet:\n55"
+            )
         ],
         [
-            ("What is the capital of France?", "The capital of France is Paris."),
-            ("Who wrote 'Pride and Prejudice'?", "Jane Austen wrote 'Pride and Prejudice'."),
+            (
+                "Thought: To sum all numbers from 1 to 10, I can use a simple loop in Python to iterate over the range of numbers and add them up. I will use the built-in `range` function to generate the numbers from 1 to 10, and a variable to keep track of the sum.",
+                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
+            ),
+            (
+                "Thought: The code snippet has successfully calculated the sum of all numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
+                "Observation: Execution logs:\nLast output from code snippet:\n55"
+            )
         ],
     ]
 
-    input_ids, completion_mask, advantages = build_inputs(
+    input_ids, attention_mask, completion_mask, advantages = build_inputs(
         traces=traces,
         tokenizer=tokenizer,
         reward_function=lambda trace: 1.0)
 
     print("Input IDs:", input_ids)
     print("Shape of input_ids:", input_ids.shape)
+    print("Attention Mask:", attention_mask)
+    print("Shape of attention_mask:", attention_mask.shape)
     print("Completion Mask:", completion_mask)
     print("Shape of completion_mask:", completion_mask.shape)
     print("Advantages:", advantages)
     print("Shape of advantages:", advantages.shape)
     print("Decoded first trace:", tokenizer.decode(input_ids[0]))
 
-    log_probs = policy_model.get_log_probs(input_ids)
+    log_probs = policy_model.get_log_probs(input_ids, attention_mask)
     print("Log probabilities shape:", log_probs.shape)
     print("Log probabilities:", log_probs)

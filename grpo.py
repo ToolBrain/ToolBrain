@@ -18,15 +18,15 @@ def grpo_step(
     
     pi_theta = copy_model(initial_policy)
 
-    input_ids, completion_mask, advantages = build_inputs(
+    input_ids, attention_mask, completion_mask, advantages = build_inputs(
         traces=traces,
         tokenizer=pi_theta.tokenizer,
         reward_function=reward_function,
     ) # All have shape (N,T)
 
     for _ in range(config["mu"]):
-        pi_theta_log_probs = pi_theta.get_log_probs(input_ids)  # shape: (N,T)
-        pi_ref_log_probs = initial_policy.get_log_probs(input_ids)  # shape: (N,T)
+        pi_theta_log_probs = pi_theta.get_log_probs(input_ids, attention_mask)  # shape: (N,T)
+        pi_ref_log_probs = initial_policy.get_log_probs(input_ids, attention_mask)  # shape: (N,T)
 
         loss = grpo_loss(
             pi_theta_log_probs=pi_theta_log_probs,
