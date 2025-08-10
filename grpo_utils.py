@@ -4,7 +4,13 @@ import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from torch.nn.utils.rnn import pad_sequence
+from typing import NamedTuple, List, Tuple
 
+class Batch(NamedTuple):
+    input_ids: torch.Tensor
+    attention_mask: torch.Tensor
+    completion_mask: torch.Tensor
+    advantages: torch.Tensor
 
 def copy_model(model: nn.Module) -> nn.Module:
     return model.copy() if hasattr(model, 'copy') else deepcopy(model)
@@ -25,29 +31,26 @@ def compute_advantages(rewards: torch.Tensor) -> torch.Tensor:
 def build_inputs(
     traces: list[list[tuple[str, str]]],
     tokenizer: PreTrainedTokenizerBase,
-    reward_function: callable
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    rewards: list[float],
+) -> Batch:
     """
     Args:
         traces: List of traces, each trace is a list of (prompt: str, completion: str) tuples.
         tokenizer: A HuggingFace tokenizer (already loaded).
+        rewards: A list of reward-per-trace.
     
     Returns:
-        input_ids: torch.LongTensor [N, T]
-        attention_mask: torch.IntTensor [N, T]
-        completion_mask: torch.IntTensor [N, T]
-        advantages: torch.FloatTensor [N, T]
+        Batch: A named tuple containing input_ids, attention_mask, completion_mask, and advantages tensors.
     """
     all_input_ids = []
     all_completion_mask = []
     all_rewards = []
     all_attention_masks = []
 
-    for trace in traces:
+    for trace, reward in zip(traces, rewards):
         input_ids_seq = []
         completion_mask_seq = []
         rewards_seq = []
-        reward = reward_function(trace)
 
         for prompt, completion in trace:
             prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
@@ -80,7 +83,7 @@ def build_inputs(
     )
     advantages = compute_advantages(rewards)
 
-    return input_ids, attention_mask, completion_mask, advantages
+    return Batch(input_ids, attention_mask, completion_mask, advantages)
 
 def get_per_token_logps(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
     per_token_logps = [] # Use a loop to reduce memory peak.
@@ -134,10 +137,12 @@ if __name__ == "__main__":
         ],
     ]
 
-    input_ids, attention_mask, completion_mask, advantages = build_inputs(
-        traces=traces,
-        tokenizer=tokenizer,
-        reward_function=lambda trace: 1.0)
+    rewards = [1.0] * len(traces)
+    batch = build_inputs(traces=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
+    input_ids = batch.input_ids
+    attention_mask = batch.attention_mask
+    completion_mask = batch.completion_mask
+    advantages = batch.advantages
 
     print("Input IDs:", input_ids)
     print("Shape of input_ids:", input_ids.shape)

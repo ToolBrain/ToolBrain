@@ -1,45 +1,93 @@
 # Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
 
+from typing import Callable, List, Tuple, Optional
 import torch
-from grpo_utils import *
+from torch.nn.utils import clip_grad_norm_
+from grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
 from losses import grpo_loss
 
 
-def update_policy(pi_theta, loss):
-    return pi_theta
+class GRPOAlgorithm:
+    """Lightweight trainer that wraps GRPO optimization around a Policy.
 
+    Usage:
+        algo = GRPOAlgorithm(policy)
+        algo.train_step(traces, rewards)
+    """
+    def __init__(
+        self,
+        policy: Policy,
+        config: dict = None,
+    ) -> None:
+        self.policy = policy
+        self.config = config
+        self.training_steps = 0
+        self.device = next(policy.llm.parameters()).device
+        self.optimizer = torch.optim.AdamW(self.policy.llm.parameters(), lr=self.config["lr"])
 
-def grpo_step(
-        initial_policy: Policy,
-        traces: list[list[tuple[str, str]]],
-        reward_function: callable,
-        config: dict
-) -> Policy:
-    
-    pi_theta = copy_model(initial_policy)
+    def _update_policy(self, pi_theta, loss):
+        """Apply one optimizer step using the algorithm's optimizer and gradient clipping."""
+        model = getattr(pi_theta, "llm", None) or getattr(pi_theta, "model", None)
+        if model is None:
+            raise AttributeError("No model found in pi_theta")
+        
+        model.train()
+        self.optimizer.zero_grad()
+        loss.backward()
+        clip_grad_norm_(model.parameters(), self.config["max_grad_norm"])
+        self.optimizer.step()
+        return pi_theta
 
-    input_ids, attention_mask, completion_mask, advantages = build_inputs(
-        traces=traces,
-        tokenizer=pi_theta.tokenizer,
-        reward_function=reward_function,
-    ) # All have shape (N,T)
+    def train_step(
+        self,
+        traces: List[List[Tuple[str, str]]],
+        rewards: List[float],
+    ) -> Policy:
+        """Run one GRPO update over a batch of traces.
 
-    for _ in range(config["mu"]):
-        pi_theta_log_probs = pi_theta.get_log_probs(input_ids, attention_mask)  # shape: (N,T)
-        pi_ref_log_probs = initial_policy.get_log_probs(input_ids, attention_mask)  # shape: (N,T)
+        Args:
+            traces: batch of traces; each trace is a list of (prompt, completion) pairs.
+            rewards: list of scalar rewards, one per trace.
+        Returns:
+            Updated Policy (also stored in self.policy).
+        """
+        device = self.device
+        pi_theta = copy_model(self.policy).to(self.device)
+        assert len(traces) == len(rewards)
 
-        loss = grpo_loss(
-            pi_theta_log_probs=pi_theta_log_probs,
-            pi_ref_log_probs=pi_ref_log_probs,
-            advantages=advantages,
-            epsilon=config["epsilon"],
-            beta=config["beta"],
-            completion_mask=completion_mask
+        batch = build_inputs(
+            traces=traces,
+            rewards=rewards,
+            tokenizer=pi_theta.tokenizer
         )
+        input_ids = batch.input_ids.to(device)
+        attention_mask = batch.attention_mask.to(device)
+        completion_mask = batch.completion_mask.to(device)
+        advantages = batch.advantages.to(device)
 
-        pi_theta = update_policy(pi_theta, loss)
+        with torch.no_grad():
+            pi_ref_logps = self.policy.get_log_probs(input_ids, attention_mask)
 
-    return pi_theta
+        for _ in range(self.config["mu"]):
+            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask)
+            loss = grpo_loss(
+                pi_theta_log_probs=pi_theta_logps,
+                pi_ref_log_probs=pi_ref_logps,
+                advantages=advantages,
+                epsilon=self.config["epsilon"],
+                beta=self.config["beta"],
+                completion_mask=completion_mask
+            )
+            pi_theta = self._update_policy(pi_theta, loss)
+        self.policy = pi_theta
+        self.training_steps += 1
+        return pi_theta
+
+    def __repr__(self) -> str:
+        return (
+            f"GRPOAlgorithm(epsilon={self.config.get('epsilon')}, beta={self.config.get('beta')}, "
+            f"mu={self.config.get('mu')}, steps={self.training_steps})"
+        )
 
 
 if __name__ == "__main__":
@@ -80,15 +128,18 @@ if __name__ == "__main__":
             )
         ]
     ]
-    
+    rewards = [compute_reward(trace) for trace in traces]
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
         "mu": 1, # Number of GRPO optimization steps per batch
+        "lr": 1e-5, # Learning rate for optimizer
+        "max_grad_norm" :1.0, 
     }
-    new_policy = grpo_step(
-        initial_policy=initial_policy,
-        traces=traces,
-        reward_function=compute_reward,
+
+    algo = GRPOAlgorithm(
+        policy=initial_policy,
         config=config
     )
+
+    algo.train_step(traces=traces, rewards=rewards)
