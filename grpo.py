@@ -1,10 +1,11 @@
 # Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
 
+from typing import Callable, List, Tuple, Optional
 import torch
 from torch.nn.utils import clip_grad_norm_
-from grpo_utils import *
+from grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent
 from losses import grpo_loss
-from typing import Callable, List, Tuple
+
 
 
 def _policy_device(policy) -> torch.device:
@@ -42,60 +43,74 @@ def update_policy(pi_theta, loss):
     return pi_theta
 
 
-def grpo_step(
-        initial_policy: Policy,
+
+
+class GRPOAlgorithm:
+    """Lightweight trainer that wraps GRPO optimization around a Policy.
+
+    Usage:
+        algo = GRPOAlgorithm(policy)
+        algo.train_step(traces, rewards)
+    """
+    def __init__(
+        self,
+        policy: Policy,
+        config: dict = None,
+    ) -> None:
+        self.policy = policy
+        self.config = config
+        self.training_steps = 0
+
+    @property
+    def device(self) -> torch.device:
+        return _policy_device(self.policy)
+
+    def train_step(
+        self,
         traces: List[List[Tuple[str, str]]],
         rewards: List[float],
-        config: dict
-) -> Policy:
-    """
-    Perform GRPO optimization starting from the initial_policy using given traces and reward function.
-    Args:
-        initial_policy: The starting policy to be optimized.
-        traces: A batch of traces, each a list of (prompt, completion) tuples.
-        rewardsn: A list of reward-per-trace .
-        config: Configuration dictionary with keys 'epsilon', 'beta', and 'mu'.
-    Returns:
-        An updated policy after performing GRPO steps.
-    """
-    device = _policy_device(initial_policy)  # Determine device of the policy model
+    ) -> Policy:
+        """Run one GRPO update over a batch of traces.
 
-    pi_theta = copy_model(initial_policy)
+        Args:
+            traces: batch of traces; each trace is a list of (prompt, completion) pairs.
+            rewards: list of scalar rewards, one per trace.
+        Returns:
+            Updated Policy (also stored in self.policy).
+        """
+        device = _policy_device(self.policy)
+        pi_theta = copy_model(self.policy)
+        assert len(traces) == len(rewards)
 
-    # Build inputs and move tensors to the policy device
-    input_ids, attention_mask, completion_mask, advantages = build_inputs(
-        traces=traces,
-        tokenizer=pi_theta.tokenizer,
-        rewards=rewards,
-    )
-    input_ids = input_ids.to(device)
-    attention_mask = attention_mask.to(device)
-    completion_mask = completion_mask.to(device)
-    advantages = advantages.to(device)
+        batch = pi_theta.encode_traces(traces=traces, rewards=rewards)
+        input_ids = batch.input_ids.to(device)
+        attention_mask = batch.attention_mask.to(device)
+        completion_mask = batch.completion_mask.to(device)
+        advantages = batch.advantages.to(device)
 
-    # Compute reference log probabilities once under no grad
-    with torch.no_grad():
-        pi_ref_log_probs = initial_policy.get_log_probs(input_ids, attention_mask)
+        with torch.no_grad():
+            pi_ref_logps = self.policy.get_log_probs(input_ids, attention_mask)
 
-    # Perform mu optimization steps
-    for _ in range(config["mu"]):
-        # Compute current policy log probabilities
-        pi_theta_log_probs = pi_theta.get_log_probs(input_ids, attention_mask)
+        for _ in range(self.config["mu"]):
+            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask)
+            loss = grpo_loss(
+                pi_theta_log_probs=pi_theta_logps,
+                pi_ref_log_probs=pi_ref_logps,
+                advantages=advantages,
+                epsilon=self.config["epsilon"],
+                beta=self.config["beta"],
+                completion_mask=completion_mask
+            )
+            pi_theta = update_policy(pi_theta, loss)
+        self.policy = pi_theta
+        self.training_steps += 1
+        return pi_theta
 
-        # Compute GRPO loss
-        loss = grpo_loss(
-            pi_theta_log_probs=pi_theta_log_probs,
-            pi_ref_log_probs=pi_ref_log_probs,
-            advantages=advantages,
-            epsilon=config["epsilon"],
-            beta=config["beta"],
-            completion_mask=completion_mask
+    def __repr__(self) -> str:
+        return (
+            f"GRPOAlgorithm(epsilon={self.config.get('epsilon')}, beta={self.config.get('beta')}, "
+            f"mu={self.config.get('mu')}, steps={self.training_steps})"
         )
-
-        # Update policy parameters
-        pi_theta = update_policy(pi_theta, loss)
-
-    return pi_theta
 
 
 if __name__ == "__main__":
@@ -104,6 +119,7 @@ if __name__ == "__main__":
 
     llm, tokenizer = get_llm_and_tokenizer_from_smolagent("gpt2")
     initial_policy = Policy(llm=llm, tokenizer=tokenizer)
+    ref_policy = copy_model(initial_policy)
     traces = [
         [
             (
@@ -142,9 +158,11 @@ if __name__ == "__main__":
         "beta": 0.04, # KL divergence penalty coefficient
         "mu": 1, # Number of GRPO optimization steps per batch
     }
-    new_policy = grpo_step(
-        initial_policy=initial_policy,
-        traces=traces,
-        rewards=rewards,
+
+    algo = GRPOAlgorithm(
+        policy=initial_policy,
+        ref_policy=ref_policy,
         config=config
     )
+
+    algo.train_step(traces=traces, rewards=rewards)
