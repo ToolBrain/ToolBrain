@@ -7,44 +7,6 @@ from grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent,
 from losses import grpo_loss
 
 
-
-def _policy_device(policy) -> torch.device:
-    model = getattr(policy, "llm", None) or getattr(policy, "model", None)
-    if model is None:
-        raise AttributeError("Could not find underlying model on policy (tried 'llm' and 'model').")
-    return next(model.parameters()).device
-
-
-def update_policy(pi_theta, loss):
-    """
-    Perform a single optimization step on the policy model using the provided loss.
-    Handles locating the underlying model and optimizer, gradient clipping, and optimizer stepping.
-    """
-    # Locate underlying model
-    model = getattr(pi_theta, "llm", None)
-    if model is None:
-        model = getattr(pi_theta, "model", None)
-    if model is None:
-        raise AttributeError("Could not find model on pi_theta (tried 'llm' and 'model').")
-
-    # Ensure an optimizer exists
-    if not hasattr(pi_theta, "optimizer") or pi_theta.optimizer is None:
-        lr = getattr(pi_theta, "lr", 1e-5)
-        pi_theta.optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    optimizer = pi_theta.optimizer
-
-    # Training step
-    model.train()
-    optimizer.zero_grad()
-    loss.backward()
-    max_grad_norm = getattr(pi_theta, "max_grad_norm", 1.0)
-    clip_grad_norm_(model.parameters(), max_grad_norm)
-    optimizer.step()
-    return pi_theta
-
-
-
-
 class GRPOAlgorithm:
     """Lightweight trainer that wraps GRPO optimization around a Policy.
 
@@ -60,10 +22,21 @@ class GRPOAlgorithm:
         self.policy = policy
         self.config = config
         self.training_steps = 0
+        self.device = next(policy.llm.parameters()).device
+        self.optimizer = torch.optim.AdamW(self.policy.llm.parameters(), lr=self.config["lr"])
 
-    @property
-    def device(self) -> torch.device:
-        return _policy_device(self.policy)
+    def _update_policy(self, pi_theta, loss):
+        """Apply one optimizer step using the algorithm's optimizer and gradient clipping."""
+        model = getattr(pi_theta, "llm", None) or getattr(pi_theta, "model", None)
+        if model is None:
+            raise AttributeError("No model found in pi_theta")
+        
+        model.train()
+        self.optimizer.zero_grad()
+        loss.backward()
+        clip_grad_norm_(model.parameters(), self.config["max_grad_norm"])
+        self.optimizer.step()
+        return pi_theta
 
     def train_step(
         self,
@@ -78,8 +51,8 @@ class GRPOAlgorithm:
         Returns:
             Updated Policy (also stored in self.policy).
         """
-        device = _policy_device(self.policy)
-        pi_theta = copy_model(self.policy)
+        device = self.device
+        pi_theta = copy_model(self.policy).to(self.device)
         assert len(traces) == len(rewards)
 
         batch = build_inputs(
@@ -105,7 +78,7 @@ class GRPOAlgorithm:
                 beta=self.config["beta"],
                 completion_mask=completion_mask
             )
-            pi_theta = update_policy(pi_theta, loss)
+            pi_theta = self._update_policy(pi_theta, loss)
         self.policy = pi_theta
         self.training_steps += 1
         return pi_theta
@@ -160,6 +133,8 @@ if __name__ == "__main__":
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
         "mu": 1, # Number of GRPO optimization steps per batch
+        "lr": 1e-5, # Learning rate for optimizer
+        "max_grad_norm" :1.0, 
     }
 
     algo = GRPOAlgorithm(
