@@ -13,6 +13,11 @@ class TraceStep(TypedDict):
     type: Literal["thought", "tool_code", "tool_output", "final_answer"]
     content: str
 
+class Example(TypedDict):
+    """A pair of prompt and completion."""
+    type: Literal["prompt", "completion"]
+    content: str
 
 # Type alias for a complete execution trace
-Trace = List[TraceStep] 
+# Trace = List[TraceStep]
+Trace = List[Example]
