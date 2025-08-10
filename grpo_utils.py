@@ -25,12 +25,13 @@ def compute_advantages(rewards: torch.Tensor) -> torch.Tensor:
 def build_inputs(
     traces: list[list[tuple[str, str]]],
     tokenizer: PreTrainedTokenizerBase,
-    reward_function: callable
+    rewards: list[float],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Args:
         traces: List of traces, each trace is a list of (prompt: str, completion: str) tuples.
         tokenizer: A HuggingFace tokenizer (already loaded).
+        rewards: A list of reward-per-trace.
     
     Returns:
         input_ids: torch.LongTensor [N, T]
@@ -43,11 +44,10 @@ def build_inputs(
     all_rewards = []
     all_attention_masks = []
 
-    for trace in traces:
+    for trace, reward in zip(traces, rewards):
         input_ids_seq = []
         completion_mask_seq = []
         rewards_seq = []
-        reward = reward_function(trace)
 
         for prompt, completion in trace:
             prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
@@ -134,10 +134,11 @@ if __name__ == "__main__":
         ],
     ]
 
+    rewards = [1.0] * len(traces)
     input_ids, attention_mask, completion_mask, advantages = build_inputs(
         traces=traces,
         tokenizer=tokenizer,
-        reward_function=lambda trace: 1.0)
+        rewards=rewards)
 
     print("Input IDs:", input_ids)
     print("Shape of input_ids:", input_ids.shape)

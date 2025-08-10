@@ -45,7 +45,7 @@ def update_policy(pi_theta, loss):
 def grpo_step(
         initial_policy: Policy,
         traces: List[List[Tuple[str, str]]],
-        reward_function: Callable[[List[Tuple[str, str]]], float] | Callable[[Tuple[str, str]], float],
+        rewards: List[float],
         config: dict
 ) -> Policy:
     """
@@ -53,7 +53,7 @@ def grpo_step(
     Args:
         initial_policy: The starting policy to be optimized.
         traces: A batch of traces, each a list of (prompt, completion) tuples.
-        reward_function: A callable to compute reward from a trace .
+        rewardsn: A list of reward-per-trace .
         config: Configuration dictionary with keys 'epsilon', 'beta', and 'mu'.
     Returns:
         An updated policy after performing GRPO steps.
@@ -66,7 +66,7 @@ def grpo_step(
     input_ids, attention_mask, completion_mask, advantages = build_inputs(
         traces=traces,
         tokenizer=pi_theta.tokenizer,
-        reward_function=reward_function,
+        rewards=rewards,
     )
     input_ids = input_ids.to(device)
     attention_mask = attention_mask.to(device)
@@ -136,7 +136,7 @@ if __name__ == "__main__":
             )
         ]
     ]
-    
+    rewards = [compute_reward(trace) for trace in traces]
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
@@ -145,6 +145,6 @@ if __name__ == "__main__":
     new_policy = grpo_step(
         initial_policy=initial_policy,
         traces=traces,
-        reward_function=compute_reward,
+        rewards=rewards,
         config=config
     )
