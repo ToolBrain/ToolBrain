@@ -108,9 +108,6 @@ class Policy(nn.Module):
         per_token_logps = get_per_token_logps(logits, input_ids) # Shape: (N,T)
         return per_token_logps
 
-    def encode_traces(self, traces: List[List[Tuple[str, str]]], rewards: List[float]) -> Batch:
-        return build_inputs(traces=traces, tokenizer=self.tokenizer, rewards=rewards)
-
 
 if __name__ == "__main__":
     model_id = "gpt2"
@@ -141,7 +138,7 @@ if __name__ == "__main__":
     ]
 
     rewards = [1.0] * len(traces)
-    batch = policy_model.encode_traces(traces=traces, rewards=rewards)
+    batch = build_inputs(traces=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
     input_ids = batch.input_ids
     attention_mask = batch.attention_mask
     completion_mask = batch.completion_mask

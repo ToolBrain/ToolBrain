@@ -3,7 +3,7 @@
 from typing import Callable, List, Tuple, Optional
 import torch
 from torch.nn.utils import clip_grad_norm_
-from grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent
+from grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
 from losses import grpo_loss
 
 
@@ -82,7 +82,11 @@ class GRPOAlgorithm:
         pi_theta = copy_model(self.policy)
         assert len(traces) == len(rewards)
 
-        batch = pi_theta.encode_traces(traces=traces, rewards=rewards)
+        batch = build_inputs(
+            traces=traces,
+            rewards=rewards,
+            tokenizer=pi_theta.tokenizer
+        )
         input_ids = batch.input_ids.to(device)
         attention_mask = batch.attention_mask.to(device)
         completion_mask = batch.completion_mask.to(device)
