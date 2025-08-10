@@ -1,33 +1,88 @@
 # Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
 
 import torch
+from torch.nn.utils import clip_grad_norm_
 from grpo_utils import *
 from losses import grpo_loss
+from typing import Callable, List, Tuple
+
+
+def _policy_device(policy) -> torch.device:
+    model = getattr(policy, "llm", None) or getattr(policy, "model", None)
+    if model is None:
+        raise AttributeError("Could not find underlying model on policy (tried 'llm' and 'model').")
+    return next(model.parameters()).device
 
 
 def update_policy(pi_theta, loss):
+    """
+    Perform a single optimization step on the policy model using the provided loss.
+    Handles locating the underlying model and optimizer, gradient clipping, and optimizer stepping.
+    """
+    # Locate underlying model
+    model = getattr(pi_theta, "llm", None)
+    if model is None:
+        model = getattr(pi_theta, "model", None)
+    if model is None:
+        raise AttributeError("Could not find model on pi_theta (tried 'llm' and 'model').")
+
+    # Ensure an optimizer exists
+    if not hasattr(pi_theta, "optimizer") or pi_theta.optimizer is None:
+        lr = getattr(pi_theta, "lr", 1e-5)
+        pi_theta.optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    optimizer = pi_theta.optimizer
+
+    # Training step
+    model.train()
+    optimizer.zero_grad()
+    loss.backward()
+    max_grad_norm = getattr(pi_theta, "max_grad_norm", 1.0)
+    clip_grad_norm_(model.parameters(), max_grad_norm)
+    optimizer.step()
     return pi_theta
 
 
 def grpo_step(
         initial_policy: Policy,
-        traces: list[list[tuple[str, str]]],
-        reward_function: callable,
+        traces: List[List[Tuple[str, str]]],
+        reward_function: Callable[[List[Tuple[str, str]]], float] | Callable[[Tuple[str, str]], float],
         config: dict
 ) -> Policy:
-    
+    """
+    Perform GRPO optimization starting from the initial_policy using given traces and reward function.
+    Args:
+        initial_policy: The starting policy to be optimized.
+        traces: A batch of traces, each a list of (prompt, completion) tuples.
+        reward_function: A callable to compute reward from a trace .
+        config: Configuration dictionary with keys 'epsilon', 'beta', and 'mu'.
+    Returns:
+        An updated policy after performing GRPO steps.
+    """
+    device = _policy_device(initial_policy)  # Determine device of the policy model
+
     pi_theta = copy_model(initial_policy)
 
+    # Build inputs and move tensors to the policy device
     input_ids, attention_mask, completion_mask, advantages = build_inputs(
         traces=traces,
         tokenizer=pi_theta.tokenizer,
         reward_function=reward_function,
-    ) # All have shape (N,T)
+    )
+    input_ids = input_ids.to(device)
+    attention_mask = attention_mask.to(device)
+    completion_mask = completion_mask.to(device)
+    advantages = advantages.to(device)
 
+    # Compute reference log probabilities once under no grad
+    with torch.no_grad():
+        pi_ref_log_probs = initial_policy.get_log_probs(input_ids, attention_mask)
+
+    # Perform mu optimization steps
     for _ in range(config["mu"]):
-        pi_theta_log_probs = pi_theta.get_log_probs(input_ids, attention_mask)  # shape: (N,T)
-        pi_ref_log_probs = initial_policy.get_log_probs(input_ids, attention_mask)  # shape: (N,T)
+        # Compute current policy log probabilities
+        pi_theta_log_probs = pi_theta.get_log_probs(input_ids, attention_mask)
 
+        # Compute GRPO loss
         loss = grpo_loss(
             pi_theta_log_probs=pi_theta_log_probs,
             pi_ref_log_probs=pi_ref_log_probs,
@@ -37,6 +92,7 @@ def grpo_step(
             completion_mask=completion_mask
         )
 
+        # Update policy parameters
         pi_theta = update_policy(pi_theta, loss)
 
     return pi_theta
