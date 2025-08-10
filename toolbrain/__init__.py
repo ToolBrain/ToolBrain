@@ -7,7 +7,7 @@ reward function evaluation, and RL algorithm integration.
 """
 
 from .brain import Brain
-from .types import Trace, TraceStep
+from .core_types import Trace, TraceStep
 
 __version__ = "0.1.0"
 __all__ = ["Brain", "Trace", "TraceStep"] 

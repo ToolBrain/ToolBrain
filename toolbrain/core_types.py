@@ -5,8 +5,7 @@ This module defines the fundamental data structures used throughout
 the ToolBrain framework for representing agent execution traces.
 """
 
-from typing import List, Literal, TypedDict
-
+from typing import List, Literal, TypedDict, NamedTuple
 
 class TraceStep(TypedDict):
     """A single step in an agent's execution trace."""
@@ -20,4 +19,4 @@ class Example(TypedDict):
 
 # Type alias for a complete execution trace
 # Trace = List[TraceStep]
-Trace = List[Example]
+Trace = list[Example]

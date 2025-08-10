@@ -6,7 +6,7 @@ to evaluate the quality of agent execution traces.
 """
 
 from typing import Optional
-from .types import Trace
+from .core_types import Trace
 
 
 def reward_exact_match(trace: Trace, gold_answer: str) -> float:
