@@ -119,7 +119,6 @@ if __name__ == "__main__":
 
     llm, tokenizer = get_llm_and_tokenizer_from_smolagent("gpt2")
     initial_policy = Policy(llm=llm, tokenizer=tokenizer)
-    ref_policy = copy_model(initial_policy)
     traces = [
         [
             (
@@ -161,7 +160,6 @@ if __name__ == "__main__":
 
     algo = GRPOAlgorithm(
         policy=initial_policy,
-        ref_policy=ref_policy,
         config=config
     )
 
