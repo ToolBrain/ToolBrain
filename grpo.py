@@ -16,13 +16,16 @@ class GRPOAlgorithm:
     """
     def __init__(
         self,
-        policy: Policy,
+        initial_policy: Policy,
+        ref_policy: Policy = None,
         config: dict = None,
     ) -> None:
-        self.policy = policy
+        self.policy = initial_policy
+        # the reference model, usually the initial Supervised Fine-Tuning model
+        self.pi_ref = ref_policy if ref_policy else copy_model(initial_policy) 
         self.config = config
         self.training_steps = 0
-        self.device = next(policy.llm.parameters()).device
+        self.device = next(initial_policy.llm.parameters()).device
         self.optimizer = torch.optim.AdamW(self.policy.llm.parameters(), lr=self.config["lr"])
 
     def _update_policy(self, pi_theta, loss):
@@ -46,7 +49,7 @@ class GRPOAlgorithm:
         """Run one GRPO update over a batch of traces.
 
         Args:
-            traces: batch of traces; each trace is a list of (prompt, completion) pairs.
+            traces: batch of traces; each trace is a list TraceStep.
             rewards: list of scalar rewards, one per trace.
         Returns:
             Updated Policy (also stored in self.policy).
@@ -65,20 +68,34 @@ class GRPOAlgorithm:
         completion_mask = batch.completion_mask.to(device)
         advantages = batch.advantages.to(device)
 
+        # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
+        #   - pi_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
+        #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
         with torch.no_grad():
-            pi_ref_logps = self.policy.get_log_probs(input_ids, attention_mask)
+            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask)
+            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask)
 
         for _ in range(self.config["mu"]):
+            # Current policy log-probs
             pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask)
+
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_logps,
+                pi_theta_old_log_probs=pi_old_logps,
                 pi_ref_log_probs=pi_ref_logps,
                 advantages=advantages,
                 epsilon=self.config["epsilon"],
                 beta=self.config["beta"],
-                completion_mask=completion_mask
+                completion_mask=completion_mask,
             )
+            print(loss)
+
+            # Apply update
             pi_theta = self._update_policy(pi_theta, loss)
+
+            # Cache current log-probs as next step's old-policy (detach from graph)
+            pi_old_logps = pi_theta_logps.detach()
+
         self.policy = pi_theta
         self.training_steps += 1
         return pi_theta
@@ -132,13 +149,13 @@ if __name__ == "__main__":
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
-        "mu": 1, # Number of GRPO optimization steps per batch
+        "mu": 3, # Number of GRPO optimization steps per batch
         "lr": 1e-5, # Learning rate for optimizer
         "max_grad_norm" :1.0, 
     }
 
     algo = GRPOAlgorithm(
-        policy=initial_policy,
+        initial_policy=initial_policy,
         config=config
     )
 
