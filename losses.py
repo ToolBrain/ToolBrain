@@ -32,5 +32,52 @@ def grpo_loss(
 
     # Token-level loss
     per_token_loss = -(policy_gain - beta * kl_divergence)  # shape: (N,T)
-    loss = (per_token_loss * completion_mask).sum() / completion_mask.sum()
-    return loss # scalar loss value
+
+    # Average loss
+    # 1) Average over non-masked tokens for each completion
+    # 2) Average equally across completions in the group
+    mask = completion_mask.to(per_token_loss.dtype)
+    valid_counts = mask.sum(dim=1).clamp_min(1.0)
+    per_completion_mean = ((per_token_loss * mask).sum(dim=1)) / valid_counts  # shape: (N,)
+
+    loss = per_completion_mean.mean()  # scalar
+    return loss
+
+
+
+if __name__ == "__main__":
+    pi_theta_log_probs = torch.log(torch.tensor([
+        [0.2, 0.3, 0.5, 0.0, 0.0],
+        [0.1, 0.4, 0.0, 0.0, 0.0],
+        [0.3, 0.3, 0.2, 0.1, 0.1]
+    ]) + 1e-6)
+
+    pi_theta_old_log_probs = pi_theta_log_probs - 0.05
+    pi_ref_log_probs = pi_theta_log_probs - 0.02
+
+    advantages = torch.tensor([
+        [1.0, 0.5, -0.5, 0.0, 0.0],
+        [0.3, -0.2, 0.0, 0.0, 0.0],
+        [0.5, 0.5, 0.5, 0.5, 0.5]
+    ])
+
+    epsilon = 0.2
+    beta = 0.01
+
+    completion_mask = torch.tensor([
+        [1, 1, 1, 0, 0],
+        [1, 1, 0, 0, 0],
+        [1, 1, 1, 1, 1]
+    ])
+
+    loss = grpo_loss(
+        pi_theta_log_probs,
+        pi_theta_old_log_probs,
+        pi_ref_log_probs,
+        advantages,
+        epsilon,
+        beta,
+        completion_mask
+    )
+
+    print("Test loss:", loss.item()) # -0.30953896045684814

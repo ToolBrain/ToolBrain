@@ -88,7 +88,6 @@ class GRPOAlgorithm:
                 beta=self.config["beta"],
                 completion_mask=completion_mask,
             )
-            print(loss)
 
             # Apply update
             pi_theta = self._update_policy(pi_theta, loss)
