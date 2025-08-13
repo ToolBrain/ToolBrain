@@ -1,0 +1,2 @@
+- 02_grammarly.py: train your agent to fix your typos and grammars with LLM-as-a-judge
+- 03_mcp.py: train your agent to work with any MCP server
