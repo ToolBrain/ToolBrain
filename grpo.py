@@ -3,7 +3,7 @@
 from typing import Callable, List, Tuple, Optional
 import torch
 from torch.nn.utils import clip_grad_norm_
-from grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
+from grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs, Turn
 from losses import grpo_loss
 
 
@@ -43,7 +43,7 @@ class GRPOAlgorithm:
 
     def train_step(
         self,
-        traces: List[List[Tuple[str, str]]],
+        traces: List[List[Turn]],
         rewards: List[float],
     ) -> Policy:
         """Run one GRPO update over a batch of traces.
@@ -63,30 +63,31 @@ class GRPOAlgorithm:
             rewards=rewards,
             tokenizer=pi_theta.tokenizer
         )
-        input_ids = batch.input_ids.to(device)
-        attention_mask = batch.attention_mask.to(device)
-        completion_mask = batch.completion_mask.to(device)
-        advantages = batch.advantages.to(device)
+ 
+        input_ids = batch.input_ids.to(device) # shape: (N, T)
+        attention_mask = batch.attention_mask.to(device) # shape: (N, T)
+        completion_mask = batch.completion_mask.to(device) # shape: (N, T)
+        advantages = batch.advantages.to(device) # shape: (N, T)
 
         # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
         #   - pi_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
         #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
         with torch.no_grad():
-            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask)
-            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask)
+            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
+            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
 
         for _ in range(self.config["mu"]):
             # Current policy log-probs
-            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask)
+            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
 
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_logps,
                 pi_theta_old_log_probs=pi_old_logps,
                 pi_ref_log_probs=pi_ref_logps,
-                advantages=advantages,
+                advantages=advantages[:,1:], # shape: (N, T-1)
                 epsilon=self.config["epsilon"],
                 beta=self.config["beta"],
-                completion_mask=completion_mask,
+                completion_mask=completion_mask[:,1:], # shape: (N, T-1)
             )
 
             # Apply update
@@ -108,41 +109,42 @@ class GRPOAlgorithm:
 
 if __name__ == "__main__":
     def compute_reward(trace):
+        # Placeholder: assign a random scalar per-trace reward
         return torch.rand(1, dtype=torch.float32).item()
 
     llm, tokenizer = get_llm_and_tokenizer_from_smolagent("gpt2")
     initial_policy = Policy(llm=llm, tokenizer=tokenizer)
-    traces = [
+    traces: List[List[Turn]] = [
         [
-            (
-                "Thought: I can use a simple Python loop to iterate over the numbers from 1 to 10 and sum them up.",
-                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
+            Turn(
+                prompt_for_model="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
+                model_completion="Thought: I'll write a short Python loop.\n```python\ns=sum(range(1,11)); print(s)\n```\n",
+                parsed_completion={"thought": True, "has_code": True},
+                tool_output="Execution logs:\n55\nLast output from code snippet:\n55",
             ),
-            (
-                "Thought: The code snippet has successfully calculated the sum of numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
-                "Observation: Execution logs:\nLast output from code snippet:\n55"
+            Turn(
+                prompt_for_model="Given the tool output above, provide the final answer.",
+                model_completion="Final Answer: 55",
+                parsed_completion={"final_answer": True},
+                tool_output="",
+            ),
+        ],
+        [
+            Turn(
+                prompt_for_model="You are a math helper. Sum 1..10.",
+                model_completion="I can compute it mentally: 55.",
+                parsed_completion={"final_answer": True},
+                tool_output="",
             )
         ],
         [
-            (
-                "Thought: To sum all numbers from 1 to 10, I can use a simple loop in Python to iterate over the range of numbers and add them up. I will use the built-in `range` function to generate the numbers from 1 to 10, and a variable to keep track of the sum.",
-                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
-            ),
-            (
-                "Thought: The code snippet has successfully calculated the sum of all numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
-                "Observation: Execution logs:\nLast output from code snippet:\n55"
+            Turn(
+                prompt_for_model="Explain quickly and give the result for 1..10.",
+                model_completion="Summing 1 through 10 gives 55.",
+                parsed_completion={"final_answer": True},
+                tool_output="",
             )
         ],
-        [
-            (
-                "Thought: To sum all numbers from 1 to 10, I can use a simple Python loop to iterate over the range of numbers and add them up. I will use the built-in `range` function to generate the numbers from 1 to 10, and then use a `for` loop to iterate over the range and add each number to a running total.",
-                "Observation: Execution logs:\n55\nLast output from code snippet:\nNone"
-            ),
-            (
-                "Thought: The code snippet has successfully calculated the sum of numbers from 1 to 10, which is 55. Now, I can use the `final_answer` tool to provide the final answer.",
-                "Observation: Execution logs:\nLast output from code snippet:\n55"
-            )
-        ]
     ]
     rewards = [compute_reward(trace) for trace in traces]
     config = {
