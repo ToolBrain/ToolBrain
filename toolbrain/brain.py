@@ -3,19 +3,13 @@ Brain module - Core training orchestration for ToolBrain.
 
 This module contains the Brain class which orchestrates the training process
 by coordinating agent execution, reward calculation, and RL algorithm updates.
+
+The Brain now uses the Adapter pattern for clean separation of concerns.
 """
 
 from typing import Any, Callable, List, Protocol
-import functools
-
-from .types import Trace, TraceStep
-
-
-class Agent(Protocol):
-    """Protocol defining the interface for agents used with Brain."""
-    def run(self, query: str) -> Any:
-        """Execute a query and return the result."""
-        ...
+from .core_types import Trace, TraceStep, RewardFunction
+from .adapters import BaseAgentAdapter
 
 
 class RLAlgorithm(Protocol):
@@ -40,20 +34,40 @@ class MockRLAlgorithm:
         print(f"🧠 {self.algorithm_name} - Training Step #{self.training_steps}")
         print("=" * 60)
         print(f"📊 Batch Size: {len(traces)} traces")
-        print(f"📈 Average Reward: {sum(rewards) / len(rewards):.3f}")
-        print(f"📊 Reward Range: [{min(rewards):.3f}, {max(rewards):.3f}]")
+        avg = (sum(rewards) / len(rewards)) if rewards else 0.0
+        rmin = min(rewards) if rewards else 0.0
+        rmax = max(rewards) if rewards else 0.0
+        print(f"📈 Average Reward: {avg:.3f}")
+        print(f"📊 Reward Range: [{rmin:.3f}, {rmax:.3f}]")
         print()
         print("📋 Training Data Summary:")
-        
         for i, (trace, reward) in enumerate(zip(traces, rewards)):
-            print(f"  Trace {i+1}: {len(trace)} steps, reward = {reward:.3f}")
-            for j, step in enumerate(trace[:6]):  
-                content_preview = step["content"][:50] + "..." if len(step["content"]) > 50 else step["content"]
-                print(f"    Step {j+1} [{step['type']}]: {content_preview}")
+            print(f"  Trace {i+1}: {len(trace)} turns, reward = {reward:.3f}")
+            # Show first few turns for each trace
+            for j, turn in enumerate(trace[:3]):  # Show first 3 turns
+                print(f"    Turn {j+1}:")
+                print(f"      Prompt: {turn['prompt_for_model'][:50]}...")
+                print(f"      Completion: {turn['model_completion'][:50]}...")
+                
+                # Show parsed completion details
+                parsed = turn['parsed_completion']
+                if parsed.get('thought'):
+                    thought_preview = parsed['thought'][:50] + "..." if len(parsed['thought']) > 50 else parsed['thought']
+                    print(f"      Thought: {thought_preview}")
+                if parsed.get('tool_code'):
+                    code_preview = parsed['tool_code'][:50] + "..." if len(parsed['tool_code']) > 50 else parsed['tool_code']
+                    print(f"      Tool Code: {code_preview}")
+                if parsed.get('final_answer'):
+                    answer_preview = parsed['final_answer'][:50] + "..." if len(parsed['final_answer']) > 50 else parsed['final_answer']
+                    print(f"      Final Answer: {answer_preview}")
+                
+                if turn['tool_output']:
+                    output_preview = turn['tool_output'][:50] + "..." if len(turn['tool_output']) > 50 else turn['tool_output']
+                    print(f"      Tool Output: {output_preview}")
             
-            if len(trace) > 5:
-                print(f"    ... and {len(trace) - 5} more steps")
-            print()  # Add spacing between traces
+            if len(trace) > 3:
+                print(f"    ... and {len(trace) - 3} more turns")
+            print()
         
         print()
         print("🔄 Mock training completed. Real RL algorithm would update model weights here.")
@@ -64,212 +78,70 @@ class Brain:
     """
     Core training orchestrator for ToolBrain.
     
-    The Brain automatically instruments any CodeAgent to capture execution traces,
-    hiding all complexity from the user. Users simply pass their normal CodeAgent
-    and Brain handles the rest.
+    The Brain now uses the Adapter pattern for clean separation of concerns.
+    Users pass an agent adapter that conforms to the BaseAgentAdapter interface,
+    making the system more explicit, testable, and extensible.
     """
     
     def __init__(
         self,
-        agent: Agent,
-        reward_func: Callable[[Trace, str], float],
+        agent_adapter: BaseAgentAdapter,
+        reward_func: RewardFunction,
         learning_algorithm: str = "MockRL"
     ) -> None:
         """
-        Initialize the Brain with automatic agent instrumentation.
+        Initialize the Brain with an agent adapter.
         
         Args:
-            agent: Any CodeAgent instance (will be automatically instrumented)
-            reward_func: Function to calculate rewards from traces
+            agent_adapter: An adapter that conforms to BaseAgentAdapter interface
+            reward_func: Flexible reward function callable (see RewardFunction protocol)
             learning_algorithm: Name of the RL algorithm to use
         """
+        if not isinstance(agent_adapter, BaseAgentAdapter):
+            raise TypeError(
+                f"Expected BaseAgentAdapter instance, got {type(agent_adapter)}. "
+                "Use an adapter like SmolAgentAdapter to wrap your agent."
+            )
+        
+        self.agent_adapter = agent_adapter
         self.reward_func = reward_func
         self.learning_algorithm = learning_algorithm
         
-        # Automatically instrument the agent for trace capture
-        self.agent = self._instrument_agent(agent)
-        
-        # Initialize RL algorithm (currently only MockRL is implemented)
         self.rl_module: RLAlgorithm = MockRLAlgorithm(learning_algorithm)
         
         print(f"🧠 Brain initialized with {learning_algorithm} algorithm")
-        print("✅ Agent automatically instrumented for tracing")
+        print(f"✅ Using agent adapter: {type(agent_adapter).__name__}")
     
-    def _instrument_agent(self, agent_instance: Agent) -> Agent:
-        """
-        Automatically instrument a CodeAgent to capture execution traces.
-        
-        This method uses monkey patching to wrap the agent's run() method,
-        allowing it to capture traces without requiring user changes.
-        
-        Args:
-            agent_instance: The original CodeAgent to instrument
-            
-        Returns:
-            The same agent instance, now with tracing capability
-        """
-        # Store the original run method
-        original_run = agent_instance.run
-        
-        def traced_run(query: str, **kwargs) -> Trace:
-            """Wrapper that captures execution traces from the agent."""
-            print(f"Agent executing: {query}")
-            
-            try:
-                # Execute the original run method with reset=True to clear memory
-                result = original_run(query, reset=True, **kwargs)
-                
-                # Extract trace from agent's memory
-                trace = self._extract_trace_from_memory(agent_instance)
-                
-                # Ensure we have a final answer step
-                if not any(step["type"] == "final_answer" for step in trace):
-                    trace.append({
-                        "type": "final_answer",
-                        "content": str(result) if result is not None else "No result"
-                    })
-                
-                return trace
-                
-            except Exception as e:
-                # Even if execution fails, return a trace showing what happened
-                trace = self._extract_trace_from_memory(agent_instance)
-                trace.append({
-                    "type": "final_answer", 
-                    "content": f"Error: {str(e)}"
-                })
-                return trace
-        
-        # Replace the agent's run method with our traced version
-        agent_instance.run = traced_run
-        
-        return agent_instance
-    
-    def _extract_trace_from_memory(self, agent_instance: Agent) -> Trace:
-        """
-        Extract structured trace from agent's internal memory.
-        
-        Args:
-            agent_instance: The agent to extract traces from
-            
-        Returns:
-            Structured trace of the agent's execution
-        """
-        trace: Trace = []
-        
-        try:
-            if hasattr(agent_instance, 'memory') and hasattr(agent_instance.memory, 'steps'):
-                for step in agent_instance.memory.steps:
-                    # TaskStep (user query)
-                    if hasattr(step, '__class__') and 'TaskStep' in str(step.__class__):
-                        if hasattr(step, 'task'):
-                            trace.append({
-                                "type": "thought", 
-                                "content": f"Processing task: {step.task}"
-                            })
-                    
-                    # ActionStep (agent action)
-                    elif hasattr(step, '__class__') and 'ActionStep' in str(step.__class__):
-                        # Extract thought from model output
-                        if hasattr(step, 'model_output') and step.model_output:
-                            model_output = str(step.model_output)
-                            if 'Thought:' in model_output:
-                                thought_part = model_output.split('Thought:')[1]
-                                if 'Code:' in thought_part:
-                                    thought_part = thought_part.split('Code:')[0]
-                                thought_part = thought_part.strip()
-                                if thought_part:
-                                    trace.append({"type": "thought", "content": thought_part})
-                        
-                        # Extract tool code
-                        if hasattr(step, 'code_action') and step.code_action:
-                            action_content = str(step.code_action)
-                            action_content = '\n'.join(line.strip() for line in action_content.split('\n') if line.strip())
-                            if action_content:  # Only add non-empty code
-                                trace.append({
-                                    "type": "tool_code", 
-                                    "content": action_content
-                                })
-                        
-                        # Extract tool output from action_output
-                        if hasattr(step, 'action_output') and step.action_output is not None:
-                            output_content = str(step.action_output)
-                            if output_content.strip():
-                                trace.append({
-                                    "type": "tool_output", 
-                                    "content": output_content
-                                })
-                        
-                        # Extract errors as tool_output
-                        if hasattr(step, 'error') and step.error:
-                            error_content = str(step.error)
-                            trace.append({
-                                "type": "tool_output", 
-                                "content": f"Error: {error_content}"
-                            })
-                        
-                        # Check for observations (additional outputs)
-                        if hasattr(step, 'observations') and step.observations:
-                            # Join all observations into a single coherent output
-                            all_observations = []
-                            for obs in step.observations:
-                                if obs and str(obs).strip():
-                                    all_observations.append(str(obs).strip())
-                            
-                            if all_observations:
-                                # Combine all observations into one coherent tool_output
-                                combined_output = ''.join(all_observations)
-                                if combined_output.strip():
-                                    trace.append({
-                                        "type": "tool_output", 
-                                        "content": combined_output.strip()
-                                    })
-            
-        except Exception as e:
-            trace.append({
-                "type": "thought", 
-                "content": f"Memory parsing error: {str(e)}"
-            })
-        
-        # Fallback if no steps were captured
-        if not trace:
-            trace = [
-                {"type": "thought", "content": "Processing the query..."},
-                {"type": "tool_code", "content": "Executing requested operation"},
-                {"type": "tool_output", "content": "Operation completed"}
-            ]
-        
-        return trace
-    
-    def train_step(self, query: str, gold_answer: str, num_group_members: int = 10) -> None:
+    def train_step(
+        self,
+        query: str,
+        num_group_members: int = 10,
+        **reward_kwargs: Any
+    ) -> None:
         """
         Execute a single training step.
         
         Args:
             query: The input query for the agent
-            gold_answer: The expected correct answer
             num_group_members: Number of agent runs to collect for training
+            **reward_kwargs: Additional keyword arguments forwarded to reward_func
+                              (e.g., gold_answer, judge_client, constraints, etc.)
         """
         print(f"\n🚀 Starting training step with query: '{query}'")
-        print(f"🎯 Expected answer: '{gold_answer}'")
         print(f"👥 Collecting {num_group_members} traces...")
         
         traces: List[Trace] = []
         rewards: List[float] = []
         
-        # Collect multiple traces by running the agent multiple times
         for i in range(num_group_members):
             print(f"  🔄 Running agent iteration {i+1}/{num_group_members}...")
-            
             try:
-                trace = self.agent.run(query)
-                reward = self.reward_func(trace, gold_answer)
-                
+                trace = self.agent_adapter.run(query)
+                # Forward query and any provided kwargs to the reward function
+                reward = float(self.reward_func(trace=trace, query=query, **reward_kwargs))
                 traces.append(trace)
                 rewards.append(reward)
-                
                 print(f"    ✅ Trace {i+1}: {len(trace)} steps, reward = {reward:.3f}")
-                
             except Exception as e:
                 print(f"    ❌ Error in iteration {i+1}: {e}")
                 continue
@@ -280,14 +152,13 @@ class Brain:
         avg_reward = sum(rewards) / len(rewards)
         print(f"\n📊 Collected {len(traces)} traces with average reward {avg_reward:.3f}")
         
-        # Pass traces and rewards to the RL algorithm
         self.rl_module.train_step(traces, rewards)
-        
         print("\n✅ Training step completed!")
     
     def get_training_stats(self) -> dict:
         """Get current training statistics."""
         return {
             "algorithm": self.learning_algorithm,
-            "training_steps": self.rl_module.training_steps
+            "training_steps": self.rl_module.training_steps,
+            "adapter_type": type(self.agent_adapter).__name__
         } 
