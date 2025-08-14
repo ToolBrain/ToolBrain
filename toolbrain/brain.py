@@ -1,80 +1,53 @@
 """
-Brain module - The all-in-one interface for ToolBrain.
+Brain module - The flexible, user-friendly interface for ToolBrain.
 
-This module contains the Brain class which encapsulates the entire process of
-agent creation, training orchestration, reward calculation, and RL updates.
+This module contains the Brain class which orchestrates the training process.
+It automatically detects the agent type and uses the appropriate adapter.
 """
 
-from typing import Any, Callable, List, Dict
+from typing import Any, List, Dict
 from .core_types import Trace, RewardFunction
-from .adapters import SmolAgentAdapter, BaseAgentAdapter
-from .rl.grpo import GRPOAlgorithm, Policy
-from smolagents import CodeAgent, TransformersModel
+from .adapters import BaseAgentAdapter, SmolAgentAdapter
+from .rl.grpo import GRPOAlgorithm, Policy 
+from smolagents import CodeAgent
 
 
 class Brain:
     """
-    The all-in-one factory and trainer for ToolBrain agents.
+    The flexible and intelligent trainer for ToolBrain agents.
 
-    This class hides all implementation details. Users interact with this
-    single class to configure, train, and retrieve their agent.
+    Users provide their pre-configured agent, and the Brain automatically
+    handles the complexities of trace capture and RL training.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(
+        self,
+        agent: Any, # Any agent instance
+        reward_func: RewardFunction,
+        learning_algorithm: str = "GRPO",
+        rl_config: Dict[str, Any] = None
+    ):
         """
-        Initializes the entire system from a single configuration dictionary.
-        
-        Args:
-            config (Dict[str, Any]): A dictionary containing all necessary settings.
-                Required keys:
-                    - "model_id": str (e.g., "HuggingFaceTB/SmolLM-135M-Instruct")
-                    - "tools": List[Callable]
-                    - "reward_func": RewardFunction
-                Optional keys:
-                    - "learning_algorithm": str (default: "GRPO")
-                    - "rl_config": dict (hyperparameters for the RL algorithm)
-                    - "max_turns": int (for the agent adapter)
+        Initializes the Brain by automatically selecting the correct adapter for the agent.
         """
-        self.config = config
-        print("🧠 Initializing ToolBrain...")
+        self.reward_func = reward_func
+        self.learning_algorithm = learning_algorithm
+        print(f"🧠 Initializing Brain for agent of type '{type(agent).__name__}'...")
 
-        # --- 1. Auto-initialize trainable model ---
-        model_id = self.config.get("model_id")
-        if not model_id:
-            raise ValueError("Config must include a 'model_id'.")
+        # --- "Adapter Factory" automatically ---
+        self.agent_adapter = self._get_adapter_for_agent(agent)
+        print(f"   ✅ Using adapter: {type(self.agent_adapter).__name__}")
         
-        print(f"   - Loading trainable model: {model_id}...")
-        self.model = TransformersModel(model_id=model_id)
-        print("   ✅ Model loaded.")
-
-        # --- 2. Auto-initialize base agent ---
-        tools = self.config.get("tools", [])
-        print(f"   - Initializing base CodeAgent with {len(tools)} tools...")
-        original_agent = CodeAgent(tools=tools, model=self.model)
-        print("   ✅ Base agent created.")
-
-        # --- 3. Auto-initialize internal adapter ---
-        print("   - Creating internal agent adapter...")
+        # Get trainable model from adapter
+        trainable_model = self.agent_adapter.get_trainable_model()
         
-        self.agent_adapter = SmolAgentAdapter(
-            agent=original_agent,
-            max_turns=self.config.get("max_turns", 5)
-        )
-        print("   ✅ Adapter created.")
-
-        # --- 4. Auto-initialize RL module ---
-        learning_algorithm = self.config.get("learning_algorithm", "GRPO")
+        # --- Initialize RL module ---
         print(f"   - Initializing RL algorithm: {learning_algorithm}...")
-        
-        self.reward_func = self.config.get("reward_func")
-        if not self.reward_func:
-            raise ValueError("Config must include a 'reward_func'.")
-
         if learning_algorithm == "GRPO":
-            policy = Policy(llm=self.model.model, tokenizer=self.model.tokenizer)
+            policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
             self.rl_module = GRPOAlgorithm(
                 policy=policy, 
-                config=self.config.get("rl_config", {})
+                config=rl_config or {}
             )
         else:
             raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
@@ -82,7 +55,19 @@ class Brain:
         
         print("\n✅ Brain is ready for training.")
 
-    def train(self, dataset: List[Dict[str, Any]], num_iterations: int = 10):
+    def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
+        """
+        Factory method to automatically select the appropriate adapter for the given agent.
+        """
+        if isinstance(agent_instance, CodeAgent):
+            return SmolAgentAdapter(agent=agent_instance)
+        # Future example:
+        # elif isinstance(agent_instance, AutoGenAgent):
+        #     return AutoGenAdapter(agent=agent_instance)
+        else:
+            raise TypeError(f"Agent type '{type(agent_instance).__name__}' is not supported yet.")
+
+    def train(self, dataset: List[Dict[str, Any]], num_iterations: int = 1):
         """
         Runs the full training process on a dataset.
         

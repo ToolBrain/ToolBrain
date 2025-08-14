@@ -10,9 +10,9 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from smolagents import tool
+from smolagents import CodeAgent, TransformersModel, tool
 from toolbrain import Brain
-from toolbrain.rewards import reward_exact_match, reward_combined
+from toolbrain.rewards import reward_exact_match
 
 # --- 1. Define Tools and Reward Function (User-defined) ---
 @tool
@@ -39,45 +39,35 @@ training_dataset = [
 ]
 
 def main():
-    print("🧠 ToolBrain Simplified Training Example")
+    print("🧠 ToolBrain Flexible Training Example")
     print("=" * 60)
 
-    # --- 3. Define Brain Configuration ---
-    # User defines a single dictionary
-    toolbrain_config = {
-        # Trainable model (downloaded locally)
-        "model_id": "HuggingFaceTB/SmolLM-135M-Instruct",
-        "tools": [add, multiply],
-        "reward_func": reward_exact_match, # Select a reward function
-        "learning_algorithm": "GRPO",
-        
-        # Optional parameters
-        "num_group_members": 4, # Traces per query
-        "rl_config": {
-            "lr": 1e-5,
-            "epsilon": 0.2,
-            "beta": 0.01,
-            "mu": 1,
-            "max_grad_norm": 1.0,
-        }
-    }
+    # --- 3. User creates their agent freely ---
+    print("🤖 User is creating their own agent...")
+    # User must use TransformersModel to train
+    trainable_model = TransformersModel(model_id="HuggingFaceTB/SmolLM-135M-Instruct")
+    
+    my_agent = CodeAgent(
+        tools=[add, multiply],
+        model=trainable_model
+    )
+    print("✅ Agent created.")
 
-    # --- 4. Initialize and Train ---
-    # User only needs to know the Brain class
+    # --- 4. Initialize Brain and Train ---
+    # User only needs to pass their agent to Brain
     try:
-        # Brain handles everything internally
-        brain = Brain(toolbrain_config)
+        brain = Brain(
+            agent=my_agent,
+            reward_func=reward_exact_match,
+            learning_algorithm="GRPO",
+            rl_config={"lr": 1e-5} # RL configuration
+        )
         
-        # Train on the full dataset
-        brain.train(training_dataset, num_iterations=1)
+        brain.train(training_dataset)
         
-        # Get the trained agent for use
+        # Get the trained agent
         trained_agent = brain.get_agent()
-        print("\n🤖 Agent after training:")
-        
-        # Test the trained agent
-        result_trace = trained_agent.run("What is 100 + 50?")
-        print(result_trace)
+        print("\n🤖 Agent after training is ready to use.")
 
     except Exception as e:
         print(f"\n❌ An error occurred: {e}")
