@@ -3,7 +3,7 @@
 from typing import List
 
 import torch
-from torch.nn.utils import clip_grad_norm_\
+from torch.nn.utils import clip_grad_norm_
 
 from .utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
 from .losses import grpo_loss
@@ -30,6 +30,12 @@ class GRPOAlgorithm:
         self.training_steps = 0
         self.device = next(initial_policy.llm.parameters()).device
         self.optimizer = torch.optim.AdamW(self.policy.llm.parameters(), lr=self.config["lr"])
+        
+        # Ensure reference policy is on the same device
+        if hasattr(self.pi_ref, "to"):
+            self.pi_ref = self.pi_ref.to(self.device)
+        elif hasattr(self.pi_ref, "llm"):
+            self.pi_ref.llm.to(self.device)
 
     def _update_policy(self, pi_theta, loss):
         """Apply one optimizer step using the algorithm's optimizer and gradient clipping."""
@@ -58,7 +64,7 @@ class GRPOAlgorithm:
             Updated Policy (also stored in self.policy).
         """
         device = self.device
-        pi_theta = copy_model(self.policy).to(self.device)
+        pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
         assert len(traces) == len(rewards)
 
         batch = build_inputs(
@@ -75,23 +81,34 @@ class GRPOAlgorithm:
         # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
         #   - pi_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
         #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
-        chunk_len = config["chunk_len"]
+        chunk_len = self.config["chunk_len"]
         with torch.no_grad():
-            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
-            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
+            pi_old_logps = pi_theta.get_log_probs(
+                input_ids=input_ids,                  # shape: (B, L)
+                attention_mask=attention_mask,        # shape: (B, L)
+                chunk_len=chunk_len
+            )                                         # shape: (B, L-1)
+            pi_ref_logps = self.pi_ref.get_log_probs(
+                input_ids=input_ids,                  # shape: (B, L)
+                attention_mask=attention_mask,        # shape: (B, L)
+                chunk_len=chunk_len
+            )                                         # shape: (B, L-1)
 
-        for _ in range(self.config["mu"]):
+        for _ in range(self.config["opt_steps"]):
             # Current policy log-probs
+            # get_log_probs drops the first token after logits computation, before per-token logprobs.
             pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
 
+            # Must shift advantages and completion_mask by 1 token
+            # so their shapes match the (B, L-1) log-probs tensors
             loss = grpo_loss(
-                pi_theta_log_probs=pi_theta_logps,
-                pi_theta_old_log_probs=pi_old_logps,
-                pi_ref_log_probs=pi_ref_logps,
-                advantages=advantages[:,1:], # shape: (B, L-1)
+                pi_theta_log_probs=pi_theta_logps,     # shape: (B, L-1)
+                pi_theta_old_log_probs=pi_old_logps,   # shape: (B, L-1)
+                pi_ref_log_probs=pi_ref_logps,         # shape: (B, L-1)
+                advantages=advantages[:,1:],           # shape: (B, L-1)
+                completion_mask=completion_mask[:,1:], # shape: (B, L-1)
                 epsilon=self.config["epsilon"],
                 beta=self.config["beta"],
-                completion_mask=completion_mask[:,1:], # shape: (B, L-1)
             )
 
             # Apply update
@@ -107,7 +124,7 @@ class GRPOAlgorithm:
     def __repr__(self) -> str:
         return (
             f"GRPOAlgorithm(epsilon={self.config.get('epsilon')}, beta={self.config.get('beta')}, "
-            f"mu={self.config.get('mu')}, steps={self.training_steps})"
+            f"opt_steps={self.config.get('opt_steps')}, steps={self.training_steps})"
         )
 
 
@@ -141,7 +158,7 @@ if __name__ == "__main__":
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
-        "mu": 3, # Number of GRPO optimization steps per batch
+        "opt_steps": 3, # Number of GRPO optimization steps per batch
         "lr": 1e-5, # Learning rate for optimizer
         "max_grad_norm" :1.0, 
         "chunk_len": 128, # If not None, get_per_token_logps will process in chunks

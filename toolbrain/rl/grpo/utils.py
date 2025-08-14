@@ -27,7 +27,7 @@ class GRPOBatch:
         )
 
     def shifted(self) -> "GRPOBatch":
-        """Return a shifted batch with the first token removed along time dimension."""
+        """Return a shifted batch with the first token removed along sequence."""
         return GRPOBatch(
             input_ids=self.input_ids[:, 1:],
             attention_mask=self.attention_mask[:, 1:],
@@ -86,7 +86,7 @@ def build_inputs(
 
     # Normalize per-trace rewards across the batch (DeepSeekMath §4.1.2)
     normalized_rewards = compute_advantages(torch.tensor(rewards, dtype=torch.float32))  # shape: (B,)
-
+    
     for idx, trace in enumerate(traces):
         seq_ids: List[int] = []
         seq_attn: List[int] = []
@@ -195,7 +195,7 @@ class Policy(nn.Module):
         (predict token t from context up to t-1).
         Output shape: (B, L-1).
         """
-        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, L, V)
+        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # shape: (B, L, V)
         
         # Exclude the last logit because it has no corresponding target token
         # (there is no "next token" after the last one)
@@ -204,7 +204,7 @@ class Policy(nn.Module):
         # the context before it (no preceding token)
         input_ids = input_ids[:, 1:] # shape: (B, L-1)
 
-        per_token_logps = get_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # (B, L-1)
+        per_token_logps = get_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # shape: (B, L-1)
         return per_token_logps
 
 
@@ -213,7 +213,7 @@ if __name__ == "__main__":
     llm, tokenizer = get_llm_and_tokenizer_from_smolagent(model_id=model_id)
     policy_model = Policy(llm=llm, tokenizer=tokenizer)
 
-    traces: List[List[Turn]] = [
+    traces: List[Trace] = [
         [
             Turn(
                 prompt_for_model="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
@@ -276,3 +276,7 @@ if __name__ == "__main__":
     print("Completion mask (row 0, shifted):", completion_mask_loss[0])
     print("#model tokens row0 (shifted):", int(completion_mask_loss[0].sum().item()))
     print("#total tokens row0 (shifted):", int(attention_mask_loss[0].sum().item()))
+
+
+
+  
