@@ -1,11 +1,12 @@
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import List
+import copy
 
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers import AutoModelForCausalLM
 
 from ...core_types import Trace, Turn, ParsedCompletion
 
@@ -34,14 +35,13 @@ class GRPOBatch:
             advantages=self.advantages[:, 1:],
         )
 
-def copy_model(model: nn.Module) -> nn.Module:
-    return model.copy() if hasattr(model, 'copy') else deepcopy(model)
-
-def compute_advantages(rewards: torch.Tensor) -> torch.Tensor:
+def compute_advantages(rewards: torch.Tensor | List[float]) -> torch.Tensor:
     """
     Implements the reward normalization described in Section 4.1.2 (Outcome Supervision) of the DeepSeekMath GRPO paper.
     Each reward value corresponds to a whole trace, and we normalize these per-trace rewards across the batch.
     """
+    if not isinstance(rewards, torch.Tensor):
+        rewards = torch.tensor(rewards, dtype=torch.float32)
     mean = rewards.mean()
     std = rewards.std(unbiased=False)
     normalized_r = (rewards - mean) / (std + 1e-8)
@@ -69,7 +69,7 @@ def build_inputs(
             - input_ids: (B, L_max)
             - attention_mask: (B, L_max), 1 for real tokens, 0 for pad
             - completion_mask: (B, L_max), 1 only on tokens from model_completion across all turns; 0 for prompt_for_model & tool_output
-            - advantages: (B, L_max) per-trace **normalized** rewards (computed over the unpadded B traces) expanded to token level; padded positions are 0.0
+            - advantages: (B, L_max) per-trace normalized rewards (computed over the unpadded B traces) expanded to token level; padded positions are 0.0
     """
     all_input_ids: List[List[int]] = []
     all_attention_masks: List[List[int]] = []
@@ -98,16 +98,25 @@ def build_inputs(
             # Append in the order actually seen by the model/logging
             # [prompt_for_model][model_completion][tool_output]
             turn_ids = prompt_ids + model_ids + tool_ids
-            seq_ids.extend(turn_ids)
 
-            # Attention mask: 1 for every real token
-            seq_attn.extend([1] * len(turn_ids))
+            # Make sure pad_sequence will not crash if input_ids is empty
+            if len(turn_ids) == 0:
+                turn_ids = tokenizer.encode(tokenizer.eos_token, add_special_tokens=False)
+                seq_ids.extend(turn_ids)
+                seq_attn.extend([1] * len(turn_ids))
+                seq_comp_mask.extend([0] * len(turn_ids))
+                seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
+            else:
+                seq_ids.extend(turn_ids)
 
-            # Completion mask: 1 only for model_completion tokens
-            seq_comp_mask.extend([0] * len(prompt_ids) + [1] * len(model_ids) + [0] * len(tool_ids))
+                # Attention mask: 1 for every real token
+                seq_attn.extend([1] * len(turn_ids))
 
-            # Expand the per-trace normalized reward along this turn's tokens
-            seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
+                # Completion mask: 1 only for model_completion tokens
+                seq_comp_mask.extend([0] * len(prompt_ids) + [1] * len(model_ids) + [0] * len(tool_ids))
+
+                # Expand the per-trace normalized reward along this turn's tokens
+                seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
 
         # Accumulate per-trace sequences
         all_input_ids.append(seq_ids)
@@ -174,12 +183,18 @@ def compute_per_token_logps(
     return torch.cat(chunk_outputs, dim=1)  # (B, L-1)
 
 class Policy(nn.Module):
-    def __init__(self, llm, tokenizer) -> None:
+    def __init__(self, llm: AutoModelForCausalLM, tokenizer: PreTrainedTokenizerBase) -> None:
         super().__init__()
         self.llm = llm
         self.tokenizer = tokenizer
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def get_log_probs(self,
+    def to(self, device):
+        self.llm.to(device)
+        return self
+
+    def get_per_token_logps(self,
                       input_ids: torch.Tensor,
                       attention_mask: torch.Tensor,
                       chunk_len: int | None = None) -> torch.Tensor:
@@ -198,6 +213,18 @@ class Policy(nn.Module):
 
         per_token_logps = compute_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # shape: (B, L-1)
         return per_token_logps
+
+    def copy(self) -> "Policy":
+        """
+        Create a deep copy of this Policy model to the same device.
+        The copy is independent from the original: llm's parameters update on one will not affect the other.
+        """
+        llm_copy = AutoModelForCausalLM.from_config(self.llm.config)
+        llm_copy.load_state_dict(self.llm.state_dict()) 
+        llm_copy.to(next(self.llm.parameters()).device)
+
+        tokenizer_copy = copy.deepcopy(self.tokenizer)
+        return Policy(llm=llm_copy, tokenizer=tokenizer_copy)
 
 
 if __name__ == "__main__":
@@ -257,8 +284,8 @@ if __name__ == "__main__":
     print("Decoded first trace:", tokenizer.decode(input_ids[0]))
 
     # Log Probs
-    log_probs = policy_model.get_log_probs(input_ids, attention_mask)  # (B, L-1)
-    log_probs_chunked = policy_model.get_log_probs(input_ids, attention_mask, chunk_len=128)  # (B, L-1)
+    log_probs = policy_model.get_per_token_logps(input_ids, attention_mask)  # (B, L-1)
+    log_probs_chunked = policy_model.get_per_token_logps(input_ids, attention_mask, chunk_len=128)  # (B, L-1)
     print("Log probabilities shape:", log_probs.shape)
     print("Log probabilities chunked shape:", log_probs_chunked.shape)
 
@@ -279,5 +306,7 @@ if __name__ == "__main__":
     print("#total tokens row0 (shifted):", int(attention_mask_loss[0].sum().item()))
 
 
-
-  
+    policy_copy = policy_model.copy()
+    assert policy_copy is not policy_model
+    assert policy_copy.llm is not policy_model.llm
+    print("Policy copy test passed: policy_copy and policy_model are different objects, including their llm modules.")

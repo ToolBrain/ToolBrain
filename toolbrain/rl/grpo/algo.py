@@ -5,19 +5,15 @@ from typing import List
 import torch
 from torch.nn.utils import clip_grad_norm_
 
-from .utils import (
-    Policy,
-    copy_model,
-    build_inputs
-)
+from .utils import Policy, build_inputs
 from .losses import grpo_loss
 from ...core_types import Trace, Turn, ParsedCompletion
 
 def validate_config(config: dict) -> None:
     """
-    Validate that the config dict contains exactly the required keys.
+    Validate that the config dict contains all the required keys.
     Raises:
-        ValueError: If any required keys are missing or extra keys are present.
+        ValueError: If any required keys are missing.
     """
     required_keys = {
         "epsilon",
@@ -45,23 +41,22 @@ class GRPOAlgorithm:
         config: dict,
         ref_policy: Policy = None,
     ) -> None:
-        self.policy = initial_policy
+        self.device = next(initial_policy.llm.parameters()).device
 
-        # the reference model, usually the initial Supervised Fine-Tuning model
-        self.pi_ref = ref_policy if ref_policy else copy_model(initial_policy)
+        self.policy = initial_policy
+        self.policy = self.policy.to(self.device)
+
+        self.pi_ref = ref_policy if ref_policy else initial_policy.copy()
+        self.pi_ref = self.pi_ref.to(self.device)
 
         validate_config(config)
         self.config = config
 
-        self.training_steps = 0
-        self.device = next(initial_policy.llm.parameters()).device
-        self.optimizer = torch.optim.AdamW(self.policy.llm.parameters(), lr=self.config["lr"])
-        
-        # Ensure reference policy is on the same device
-        if hasattr(self.pi_ref, "to"):
-            self.pi_ref = self.pi_ref.to(self.device)
-        elif hasattr(self.pi_ref, "llm"):
-            self.pi_ref.llm.to(self.device)
+        self.training_steps = 0        
+        self.optimizer = torch.optim.AdamW(
+            self.policy.llm.parameters(),
+            lr=self.config["lr"]
+        )
 
     def _update_policy(self, pi_theta, loss):
         """Apply one optimizer step using the algorithm's optimizer and gradient clipping."""
@@ -80,14 +75,12 @@ class GRPOAlgorithm:
         self,
         traces: List[Trace],
         rewards: List[float],
-    ) -> Policy:
+    ) -> None:
         """Run one GRPO update over a batch of traces.
 
         Args:
             traces: batch of traces; each trace is a list of Trace.
             rewards: list of scalar rewards, one per trace.
-        Returns:
-            Updated Policy (also stored in self.policy).
         """
         device = self.device
         pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
@@ -105,16 +98,16 @@ class GRPOAlgorithm:
         advantages = batch.advantages.to(device) # shape: (B, L)
 
         # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
-        #   - pi_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
+        #   - pi_theta_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
         #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
         chunk_len = self.config["chunk_len"]
         with torch.no_grad():
-            pi_old_logps = pi_theta.get_log_probs(
+            pi_theta_old_logps = pi_theta.get_per_token_logps(
                 input_ids=input_ids,                  # shape: (B, L)
                 attention_mask=attention_mask,        # shape: (B, L)
                 chunk_len=chunk_len
             )                                         # shape: (B, L-1)
-            pi_ref_logps = self.pi_ref.get_log_probs(
+            pi_ref_logps = self.pi_ref.get_per_token_logps(
                 input_ids=input_ids,                  # shape: (B, L)
                 attention_mask=attention_mask,        # shape: (B, L)
                 chunk_len=chunk_len
@@ -122,15 +115,15 @@ class GRPOAlgorithm:
 
         for _ in range(self.config["opt_steps"]):
             # Current policy log-probs
-            # get_log_probs drops the first token after logits computation, before per-token logprobs.
-            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
+            # get_per_token_logps drops the first token after logits computation, before per-token logprobs.
+            pi_theta_logps = pi_theta.get_per_token_logps(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
 
             # Must shift advantages and completion_mask by 1 token
             # so their shapes match the (B, L-1) log-probs tensors
             loss = grpo_loss(
-                pi_theta_log_probs=pi_theta_logps,     # shape: (B, L-1)
-                pi_theta_old_log_probs=pi_old_logps,   # shape: (B, L-1)
-                pi_ref_log_probs=pi_ref_logps,         # shape: (B, L-1)
+                pi_theta_logps=pi_theta_logps,         # shape: (B, L-1)
+                pi_theta_old_logps=pi_theta_old_logps, # shape: (B, L-1)
+                pi_ref_logps=pi_ref_logps,             # shape: (B, L-1)
                 advantages=advantages[:,1:],           # shape: (B, L-1)
                 completion_mask=completion_mask[:,1:], # shape: (B, L-1)
                 epsilon=self.config["epsilon"],
@@ -141,7 +134,7 @@ class GRPOAlgorithm:
             pi_theta = self._update_policy(pi_theta, loss)
 
             # Cache current log-probs as next step's old-policy (detach from graph)
-            pi_old_logps = pi_theta_logps.detach()
+            pi_theta_old_logps = pi_theta_logps.detach()
 
         self.policy = pi_theta
         self.training_steps += 1

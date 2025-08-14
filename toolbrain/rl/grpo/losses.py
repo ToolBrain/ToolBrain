@@ -1,9 +1,9 @@
 import torch
 
 def grpo_loss(
-        pi_theta_log_probs: torch.Tensor,
-        pi_theta_old_log_probs: torch.Tensor,
-        pi_ref_log_probs: torch.Tensor,
+        pi_theta_logps: torch.Tensor,
+        pi_theta_old_logps: torch.Tensor,
+        pi_ref_logps: torch.Tensor,
         advantages: torch.Tensor,
         epsilon: float,
         beta: float,
@@ -15,7 +15,7 @@ def grpo_loss(
     """
 
     # Clipped surrogate gain
-    log_ratio = pi_theta_log_probs - pi_theta_old_log_probs  # log(pi_theta) - log(pi_old) = log(pi_theta / pi_old) 
+    log_ratio = pi_theta_logps - pi_theta_old_logps  # log(pi_theta) - log(pi_old) = log(pi_theta / pi_old) 
     ratio = torch.exp(log_ratio)  # exp(log(pi_theta / pi_old)) = pi_theta / pi_old
     unclipped = ratio * advantages  # shape: (B, L)
 
@@ -26,7 +26,7 @@ def grpo_loss(
 
     # KL divergence (Equation 4)
     # Equation 4: (pi_ref / pi_theta) - log(pi_ref / pi_theta) - 1
-    log_kl_ratio = pi_ref_log_probs - pi_theta_log_probs  # log(pi_ref) - log(pi_theta) = log(pi_ref / pi_theta)
+    log_kl_ratio = pi_ref_logps - pi_theta_logps  # log(pi_ref) - log(pi_theta) = log(pi_ref / pi_theta)
     kl_ratio = torch.exp(log_kl_ratio)  # exp(log(pi_ref / pi_theta)) = pi_ref / pi_theta
     kl_divergence = kl_ratio - log_kl_ratio - 1.0  # shape: (B, L)
 
@@ -45,14 +45,14 @@ def grpo_loss(
 
 
 if __name__ == "__main__":
-    pi_theta_log_probs = torch.log(torch.tensor([
+    pi_theta_logps = torch.log(torch.tensor([
         [0.2, 0.3, 0.5, 0.0, 0.0],
         [0.1, 0.4, 0.0, 0.0, 0.0],
         [0.3, 0.3, 0.2, 0.1, 0.1]
     ]) + 1e-6)
 
-    pi_theta_old_log_probs = pi_theta_log_probs - 0.05
-    pi_ref_log_probs = pi_theta_log_probs - 0.02
+    pi_theta_old_logps = pi_theta_logps - 0.05
+    pi_ref_logps = pi_theta_logps - 0.02
 
     advantages = torch.tensor([
         [1.0, 0.5, -0.5, 0.0, 0.0],
@@ -70,9 +70,9 @@ if __name__ == "__main__":
     ])
 
     loss = grpo_loss(
-        pi_theta_log_probs,
-        pi_theta_old_log_probs,
-        pi_ref_log_probs,
+        pi_theta_logps,
+        pi_theta_old_logps,
+        pi_ref_logps,
         advantages,
         epsilon,
         beta,
