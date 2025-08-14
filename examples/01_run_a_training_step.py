@@ -60,27 +60,18 @@ def main():
     print("🧠 ToolBrain Flexible Training Example")
     print("=" * 60)
 
-    # --- 3. Define Brain Configuration ---
-    # User defines a single dictionary
-    toolbrain_config = {
-        # Trainable model (downloaded locally)
-        #"model_id": "HuggingFaceTB/SmolLM-135M-Instruct",
-        "model_id": "gpt2",
-        "tools": [add, multiply],
-        "reward_func": reward_exact_match, # Select a reward function
-        "learning_algorithm": "GRPO",
-        
-        # Optional parameters
-        "num_group_members": 4, # Traces per query
-        "rl_config": {
-            "epsilon": 0.2,
-            "beta": 0.04,
-            "opt_steps": 1,
-            "lr": 1e-5, 
-            "max_grad_norm" :1.0, 
-            "chunk_len": None, 
-        }
-    }
+    # --- 3. User creates their agent freely ---
+    print("🤖 User is creating their own agent...")
+    # User must use TransformersModel to train
+    #trainable_model = TransformersModel(model_id="HuggingFaceTB/SmolLM-135M-Instruct")
+    trainable_model = TransformersModel(model_id="gpt2")
+    
+    
+    my_agent = CodeAgent(
+        tools=[add, multiply],
+        model=trainable_model
+    )
+    print("✅ Agent created.")
 
     # --- 4. Initialize Brain and Train ---
     # User only needs to pass their agent to Brain
@@ -89,7 +80,18 @@ def main():
             agent=my_agent,
             reward_func=reward_exact_match,
             learning_algorithm="GRPO",
-            rl_config={"lr": 1e-5} # RL configuration
+            rl_config={
+                "epsilon": 0.2, # clipping parameter
+                "beta": 0.04, # KL divergence penalty coefficient
+                "opt_steps": 3, # Number of GRPO optimization steps per batch
+                "lr": 1e-5, # Learning rate for optimizer
+                "max_grad_norm" :1.0, 
+                "chunk_len": 128, # If not None, get_per_token_logps will process in chunks
+
+            },
+            brain_config={
+                "num_group_members": 2,
+            }
         )
         
         brain.train(training_dataset)
