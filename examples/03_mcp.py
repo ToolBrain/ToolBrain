@@ -1,10 +1,12 @@
 """
-Simple ToolBrain example - Ideal user experience.
+ToolBrain example - train your agent to work with any MCP server
 
 This script demonstrates how easy it is to use ToolBrain:
-1. Create a normal CodeAgent
-2. Pass it to Brain
-3. Run training
+1. Define tools from MCP server
+2. Create a normal CodeAgent
+3. Pass it to Brain
+4. Generate training examples
+5. Run training
 
 """
 
@@ -140,19 +142,23 @@ def main() -> None:
     # Brain automatically handles all trace instrumentation
     print("🧠 Initializing Brain...")
     brain = Brain(
-        agent=agent, reward_func=reward_exact_match, learning_algorithm="MockDPO"
+        agent=agent,
+        reward_func=reward_exact_match,
+        learning_algorithm="MockDPO",  # TODO: update to LLM-as-a-judge reward function
     )
 
     # User runs training
     print("\n🚀 Running training step...")
 
     queries = generate_training_examples(
-        agent=agent, task_description=TASK_DESCRIPTION, num_examples=NUM_EXAMPLES
+        llm=model, task_description=TASK_DESCRIPTION, num_examples=NUM_EXAMPLES
     )
 
     for i, query in enumerate(queries):
         try:
-            brain.train_step(query=query, num_group_members=3)
+            brain.train_step(
+                query=query, num_group_members=3
+            )  # TODO: update to LLM-as-a-judge reward function
 
             # Show training statistics
             stats = brain.get_training_stats()
