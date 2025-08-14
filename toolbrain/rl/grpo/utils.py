@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List
 import copy
+import json
 
 import torch
 import torch.nn as nn
@@ -34,6 +35,26 @@ class GRPOBatch:
             completion_mask=self.completion_mask[:, 1:],
             advantages=self.advantages[:, 1:],
         )
+
+# --- Robust text casting for tokenizer.encode inputs -------------------------
+def _to_text(x) -> str:
+    """Convert arbitrary values to a safe string for tokenization.
+    - None -> ""
+    - str -> as is
+    - dict/list -> JSON string (human-readable, keep unicode)
+    - others -> str(x)
+    This prevents Fast tokenizers from raising `TypeError: TextEncodeInput must be ...`.
+    """
+    if x is None:
+        return ""
+    if isinstance(x, str):
+        return x
+    if isinstance(x, (dict, list)):
+        try:
+            return json.dumps(x, ensure_ascii=False)
+        except Exception:
+            return str(x)
+    return str(x)
 
 def compute_advantages(rewards: torch.Tensor | List[float]) -> torch.Tensor:
     """
@@ -86,9 +107,10 @@ def build_inputs(
         seq_advs: List[float] = []
 
         for turn in trace:
-            prompt = turn.get("prompt_for_model", "")
-            model_text = turn.get("model_completion", "")
-            tool_text = turn.get("tool_output", "")
+            # Coerce possible non-string fields (None/dict/list/number) to string
+            prompt = _to_text(turn.get("prompt_for_model", ""))
+            model_text = _to_text(turn.get("model_completion", ""))
+            tool_text = _to_text(turn.get("tool_output", ""))
 
             # Tokenize all three segments for this turn
             prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)

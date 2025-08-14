@@ -7,7 +7,7 @@ agent libraries compatible with ToolBrain's trace-based training system.
 
 from abc import ABC, abstractmethod
 from typing import Optional, List
-from smolagents import CodeAgent, TransformersModel
+from smolagents import CodeAgent, TransformersModel, ChatMessage, MessageRole
 import io
 import contextlib
 import re
@@ -125,10 +125,10 @@ User Query: {query}
         try:
             # Gọi trực tiếp model local đã được tải
             response = self.agent.model.generate(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[ChatMessage(role=MessageRole("user"), content=prompt)],
                 stop_sequences=["Tool Output:", "Observation:"]
             )
-            return response.content or ""
+            return response["content"] or ""
         except Exception as e:
             print(f"❌ ERROR: Local model generation failed: {e}")
             return f"Error: LLM call failed. Details: {str(e)}"
