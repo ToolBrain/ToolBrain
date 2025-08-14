@@ -1,136 +1,86 @@
 """
-ToolBrain Training Example - Adapter Pattern Demonstration
+ToolBrain Training Example - Simplified API
 
-This script demonstrates the new Adapter pattern approach:
-1. Create a standard CodeAgent
-2. Wrap it with SmolAgentAdapter (explicit adapter creation)
-3. Pass the adapter to Brain
-4. Run training
-
-The Adapter pattern makes the process explicit and testable.
+This script demonstrates the new, simplified ToolBrain API.
+1. Define a configuration dictionary.
+2. Pass the config to the Brain.
+3. Call brain.train().
 """
-
 import os
 import sys
-
-from dotenv import load_dotenv
-load_dotenv()
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from smolagents import CodeAgent, InferenceClientModel, tool, LiteLLMModel
+from smolagents import tool
 from toolbrain import Brain
-from toolbrain.adapters import SmolAgentAdapter
-from toolbrain.rewards import reward_exact_match
+from toolbrain.rewards import reward_exact_match, reward_combined
 
-
+# --- 1. Define Tools and Reward Function (User-defined) ---
 @tool
 def add(a: int, b: int) -> int:
-    """
-    Add two numbers together.
-    
-    Args:
-        a: First number to add
-        b: Second number to add
-        
-    Returns:
-        The sum of a and b
-    """
+    """Adds two numbers."""
     return a + b
-
 
 @tool
 def multiply(a: int, b: int) -> int:
-    """
-    Multiply two numbers together.
-    
-    Args:
-        a: First number to multiply
-        b: Second number to multiply
-        
-    Returns:
-        The product of a and b
-    """
+    """Multiplies two numbers."""
     return a * b
 
+# --- 2. Prepare Training Data ---
+training_dataset = [
+    {
+        "query": "Use the add tool to calculate 5 + 7",
+        "gold_answer": "12"
+    },
+    {
+        "query": "What is 8 multiplied by 6?",
+        "gold_answer": "48"
+    },
+    # Add more examples here
+]
 
 def main():
-    """Demonstrate the Adapter pattern approach."""
-    
-    print("🧠 ToolBrain Training Example - Adapter Pattern")
+    print("🧠 ToolBrain Simplified Training Example")
     print("=" * 60)
-    
-    # Check for HF token
-    hf_token = os.getenv("HF_TOKEN")
-    if not hf_token:
-        raise ValueError(
-            "❌ HF_TOKEN environment variable is required!\n"
-            "Create a .env file with: HF_TOKEN=your_token_here\n"
-            "Get a token at: https://huggingface.co/settings/tokens"
-        )
-    
-    print("✅ HF_TOKEN found")
-    
-    # 1. Config variables
-    model_id = os.getenv("MODEL_ID")
-    api_base = os.getenv("API_BASE")
 
-    tools = [add, multiply]
+    # --- 3. Define Brain Configuration ---
+    # User defines a single dictionary
+    toolbrain_config = {
+        # Trainable model (downloaded locally)
+        "model_id": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "tools": [add, multiply],
+        "reward_func": reward_exact_match, # Select a reward function
+        "learning_algorithm": "GRPO",
+        
+        # Optional parameters
+        "num_group_members": 4, # Traces per query
+        "rl_config": {
+            "lr": 1e-5,
+            "epsilon": 0.2,
+            "beta": 0.01,
+            "mu": 1,
+            "max_grad_norm": 1.0,
+        }
+    }
 
-    # 2. Init model for SmolAgent (placeholder for API calls)
-    model_for_agent = LiteLLMModel(model_id=model_id)
-    
-    # 3. Create standard CodeAgent
-    print("\n🤖 Creating standard CodeAgent...")
-    original_agent = CodeAgent(tools=tools, model=model_for_agent)
-    print("✅ Standard CodeAgent created")
+    # --- 4. Initialize and Train ---
+    # User only needs to know the Brain class
+    try:
+        # Brain handles everything internally
+        brain = Brain(toolbrain_config)
+        
+        # Train on the full dataset
+        brain.train(training_dataset, num_iterations=1)
+        
+        # Get the trained agent for use
+        trained_agent = brain.get_agent()
+        print("\n🤖 Agent after training:")
+        
+        # Test the trained agent
+        result_trace = trained_agent.run("What is 100 + 50?")
+        print(result_trace)
 
-    # 4. Wrap agent with SmolAgentAdapter (Adapter Pattern)
-    print("\n🔧 Creating SmolAgentAdapter...")
-    agent_adapter = SmolAgentAdapter(
-        agent=original_agent, 
-        model_id=model_id, 
-        api_base=api_base,
-        api_key=hf_token
-    )
-    print(f"✅ Adapter created and ready.")
-    
-    # 5. Initialize Brain with adapter
-    print("\n🧠 Initializing Brain with adapter...")
-    brain = Brain(
-        agent_adapter=agent_adapter,
-        reward_func=reward_exact_match,
-        learning_algorithm="MockRL"
-    )
-    
-    # 6. Run training step
-    print("\n🚀 Running training step...")
-    
-    query = "Use the add tool to calculate 5 + 7"
-    gold_answer = "12"
-    
-    # With a gold answer (optional)
-    brain.train_step(
-        query=query,
-        num_group_members=3,
-        gold_answer=gold_answer,
-    )
-
-    # Example without a gold answer (creative task) – will work with behavior/efficiency rewards
-    # brain.train_step(
-    #     query="Write a poem about autumn.",
-    #     num_group_members=3,
-    # )
-    
-    # 7. Show training statistics
-    stats = brain.get_training_stats()
-    print(f"\n📊 Training Statistics:")
-    print(f"  Algorithm: {stats['algorithm']}")
-    print(f"  Training Steps: {stats['training_steps']}")
-    print(f"  Adapter Type: {stats['adapter_type']}")
-    
-    print("\n✅ Training step completed successfully!")
-
+    except Exception as e:
+        print(f"\n❌ An error occurred: {e}")
 
 if __name__ == "__main__":
-    main() 
+    main()
