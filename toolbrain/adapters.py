@@ -22,7 +22,7 @@ class BaseAgentAdapter(ABC):
         """Execute a query and return a structured execution trace."""
         pass
 
-    @abstractabstractmethod
+    @abstractmethod
     def get_trainable_model(self) -> TransformersModel:
         """Return the underlying trainable model from the agent."""
         pass
