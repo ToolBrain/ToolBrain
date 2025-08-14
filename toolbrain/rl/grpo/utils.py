@@ -8,7 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from .core_types import Trace, Turn, ParsedCompletion
+from ...core_types import Trace, Turn, ParsedCompletion
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ def build_inputs(
         rewards: A list of reward-per-trace (final reward). The same scalar is expanded along the time dimension of that trace.
 
     Returns:
-        Batch(input_ids, attention_mask, completion_mask, advantages):
+        GRPOBatch(input_ids, attention_mask, completion_mask, advantages):
             - input_ids: (B, L_max)
             - attention_mask: (B, L_max), 1 for real tokens, 0 for pad
             - completion_mask: (B, L_max), 1 only on tokens from model_completion across all turns; 0 for prompt_for_model & tool_output
@@ -145,12 +145,17 @@ def build_inputs(
         padding_value=0.0,
     )
 
-    return GRPOBatch(input_ids, attention_mask, completion_mask, advantages)
+    return GRPOBatch(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        completion_mask=completion_mask,
+        advantages=advantages
+    )
 
 def get_per_token_logps(
     logits: torch.Tensor,          # (B, L-1, V)
     input_ids: torch.Tensor,       # (B, L-1)
-    chunk_len: int | None = None,  # if set, compute along L in chunks to reduce peak memory
+    chunk_len: int | None = None,  # if set, compute along L in chunks of C tokens to reduce peak memory
 ) -> torch.Tensor:
     """
     Return per-token log-probs aligned with targets.
@@ -234,10 +239,10 @@ if __name__ == "__main__":
 
     rewards = [1.0] * len(traces)
     batch = build_inputs(traces=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
-    input_ids = batch["input_ids"]
-    attention_mask = batch["attention_mask"]
-    completion_mask = batch["completion_mask"]
-    advantages = batch["advantages"]
+    input_ids = batch.input_ids
+    attention_mask = batch.attention_mask
+    completion_mask = batch.completion_mask
+    advantages = batch.advantages
 
     print("Input IDs:", input_ids)
     print("Shape of input_ids:", input_ids.shape)
@@ -255,10 +260,11 @@ if __name__ == "__main__":
     print("Log probabilities chunked shape:", log_probs_chunked.shape)
 
     # Align masks/advantages for causal loss (match L-1 length)
-    input_ids_loss = input_ids[:, 1:]
-    attention_mask_loss = attention_mask[:, 1:]
-    completion_mask_loss = completion_mask[:, 1:]
-    advantages_loss = advantages[:, 1:]
+    shifted_batch = batch.shifted()
+    input_ids_loss = shifted_batch.input_ids
+    attention_mask_loss = shifted_batch.attention_mask
+    completion_mask_loss = shifted_batch.completion_mask
+    advantages_loss = shifted_batch.advantages
 
     # Sanity checks
     assert log_probs.shape == input_ids_loss.shape, f"log_probs {log_probs.shape} vs labels {input_ids_loss.shape}"

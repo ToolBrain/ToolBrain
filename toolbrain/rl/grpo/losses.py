@@ -44,7 +44,6 @@ def grpo_loss(
     return loss
 
 
-
 if __name__ == "__main__":
     pi_theta_log_probs = torch.log(torch.tensor([
         [0.2, 0.3, 0.5, 0.0, 0.0],

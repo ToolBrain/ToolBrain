@@ -1,11 +1,13 @@
 # Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
 
-from typing import Callable, List, Tuple, Optional
+from typing import List
+
 import torch
-from torch.nn.utils import clip_grad_norm_
-from .grpo_utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
+from torch.nn.utils import clip_grad_norm_\
+
+from .utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
 from .losses import grpo_loss
-from .core_types import Turn, ParsedCompletion
+from ...core_types import Turn, ParsedCompletion
 
 
 class GRPOAlgorithm:
