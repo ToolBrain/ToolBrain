@@ -64,30 +64,30 @@ class GRPOAlgorithm:
             tokenizer=pi_theta.tokenizer
         )
  
-        input_ids = batch.input_ids.to(device) # shape: (N, T)
-        attention_mask = batch.attention_mask.to(device) # shape: (N, T)
-        completion_mask = batch.completion_mask.to(device) # shape: (N, T)
-        advantages = batch.advantages.to(device) # shape: (N, T)
+        input_ids = batch.input_ids.to(device) # shape: (B, L)
+        attention_mask = batch.attention_mask.to(device) # shape: (B, L)
+        completion_mask = batch.completion_mask.to(device) # shape: (B, L)
+        advantages = batch.advantages.to(device) # shape: (B, L)
 
         # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
         #   - pi_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
         #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
         with torch.no_grad():
-            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
-            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
+            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (B, L-1)
+            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask) # shape: (B, L-1)
 
         for _ in range(self.config["mu"]):
             # Current policy log-probs
-            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
+            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (B, L-1)
 
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_logps,
                 pi_theta_old_log_probs=pi_old_logps,
                 pi_ref_log_probs=pi_ref_logps,
-                advantages=advantages[:,1:], # shape: (N, T-1)
+                advantages=advantages[:,1:], # shape: (B, L-1)
                 epsilon=self.config["epsilon"],
                 beta=self.config["beta"],
-                completion_mask=completion_mask[:,1:], # shape: (N, T-1)
+                completion_mask=completion_mask[:,1:], # shape: (B, L-1)
             )
 
             # Apply update

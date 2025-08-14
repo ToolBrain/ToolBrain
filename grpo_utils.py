@@ -83,21 +83,24 @@ def build_inputs(
 
     Returns:
         Batch(input_ids, attention_mask, completion_mask, advantages):
-            - input_ids: (B, T_max)
-            - attention_mask: (B, T_max), 1 for real tokens, 0 for pad
-            - completion_mask: (B, T_max), 1 only on tokens from model_completion across all turns; 0 for prompt_for_model & tool_output
-            - advantages: (B, T_max) normalized rewards expanded per token
+            - input_ids: (B, L_max)
+            - attention_mask: (B, L_max), 1 for real tokens, 0 for pad
+            - completion_mask: (B, L_max), 1 only on tokens from model_completion across all turns; 0 for prompt_for_model & tool_output
+            - advantages: (B, L_max) per-trace **normalized** rewards (computed over the unpadded B traces) expanded to token level; padded positions are 0.0
     """
     all_input_ids: List[List[int]] = []
     all_attention_masks: List[List[int]] = []
     all_completion_mask: List[List[int]] = []
-    all_rewards: List[List[float]] = []
+    all_advantages: List[List[float]] = []
 
-    for trace, reward in zip(traces, rewards):
+    # Normalize per-trace rewards across the batch (DeepSeekMath §4.1.2)
+    normalized_rewards = compute_advantages(torch.tensor(rewards, dtype=torch.float32))  # shape: (B,)
+
+    for idx, (trace, reward) in enumerate(zip(traces, rewards)):
         seq_ids: List[int] = []
         seq_attn: List[int] = []
         seq_comp_mask: List[int] = []
-        seq_rewards: List[float] = []
+        seq_advs: List[float] = []
 
         for turn in trace:
             prompt = turn.prompt_for_model or ""
@@ -120,14 +123,14 @@ def build_inputs(
             # Completion mask: 1 only for model_completion tokens
             seq_comp_mask.extend([0] * len(prompt_ids) + [1] * len(model_ids) + [0] * len(tool_ids))
 
-            # Expand the per-trace reward along this turn's tokens
-            seq_rewards.extend([reward] * len(turn_ids))
+            # Expand the per-trace normalized reward along this turn's tokens
+            seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
 
         # Accumulate per-trace sequences
         all_input_ids.append(seq_ids)
         all_attention_masks.append(seq_attn)
         all_completion_mask.append(seq_comp_mask)
-        all_rewards.append(seq_rewards)
+        all_advantages.append(seq_advs)
 
     # Pad to batch-first tensors
     input_ids = pad_sequence(
@@ -145,14 +148,11 @@ def build_inputs(
         batch_first=True,
         padding_value=0,
     )
-    rewards_tensor = pad_sequence(
-        [torch.tensor(seq, dtype=torch.float) for seq in all_rewards],
+    advantages = pad_sequence(
+        [torch.tensor(seq, dtype=torch.float) for seq in all_advantages],
         batch_first=True,
         padding_value=0.0,
     )
-
-    # Normalize to get advantages
-    advantages = compute_advantages(rewards_tensor)
 
     return Batch(input_ids, attention_mask, completion_mask, advantages)
 
@@ -172,16 +172,16 @@ class Policy(nn.Module):
 
     def get_log_probs(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """Return per-token log-probs aligned for causal LM loss (predict token t from context up to t-1).
-        Output shape: (N, T-1).
+        Output shape: (B, L-1).
         """
-        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # (N, T, V)
+        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, L, V)
         
         # Exclude the last logit because it has no corresponding target token (there is no "next token" after the last one)
-        logits = logits[:, :-1, :]   # shape: (N, T-1, V)
+        logits = logits[:, :-1, :]   # shape: (B, L-1, V)
         # Exclude the first token in input_ids because its prediction is based on the context before it (no preceding token)
-        input_ids = input_ids[:, 1:] # shape: (N, T-1)
+        input_ids = input_ids[:, 1:] # shape: (B, L-1)
 
-        per_token_logps = get_per_token_logps(logits, input_ids)  # (N, T-1)
+        per_token_logps = get_per_token_logps(logits, input_ids)  # (B, L-1)
         return per_token_logps
 
 
@@ -232,13 +232,13 @@ if __name__ == "__main__":
     print("Shape of advantages:", advantages.shape)
     print("Decoded first trace:", tokenizer.decode(input_ids[0]))
 
-    # Align masks/advantages for causal loss (match T-1 length)
+    # Align masks/advantages for causal loss (match L-1 length)
     input_ids_loss = input_ids[:, 1:]
     attention_mask_loss = attention_mask[:, 1:]
     completion_mask_loss = completion_mask[:, 1:]
     advantages_loss = advantages[:, 1:]
 
-    log_probs = policy_model.get_log_probs(input_ids, attention_mask)  # (N, T-1)
+    log_probs = policy_model.get_log_probs(input_ids, attention_mask)  # (B, L-1)
 
     # Sanity checks
     assert log_probs.shape == input_ids_loss.shape, f"log_probs {log_probs.shape} vs labels {input_ids_loss.shape}"
