@@ -1,82 +1,15 @@
 """
-Brain module - Core training orchestration for ToolBrain.
+Brain module - The all-in-one interface for ToolBrain.
 
-This module contains the Brain class which orchestrates the training process
-by coordinating agent execution, reward calculation, and RL algorithm updates.
-
-The Brain now uses the Adapter pattern for clean separation of concerns.
+This module contains the Brain class which encapsulates the entire process of
+agent creation, training orchestration, reward calculation, and RL updates.
 """
 
-from typing import Any, Callable, List, Protocol
-import torch
-from torch.nn.utils import clip_grad_norm_
+from typing import Any, Callable, List, Dict
 from .core_types import Trace, RewardFunction
-from .adapters import BaseAgentAdapter
-from .grpo_utils import Policy, copy_model, build_inputs
-from .losses import grpo_loss
-
-
-class RLAlgorithm(Protocol):
-    """Protocol defining the interface for RL algorithms."""
-    def train_step(self, traces: List[Trace], rewards: List[float]) -> None:
-        """Perform a single training step given traces and rewards."""
-        ...
-
-
-class MockRLAlgorithm:
-    """Mock RL algorithm for development and testing."""
-    
-    def __init__(self, algorithm_name: str = "MockRL") -> None:
-        self.algorithm_name = algorithm_name
-        self.training_steps = 0
-    
-    def train_step(self, traces: List[Trace], rewards: List[float]) -> None:
-        """Simulate a training step by logging trace and reward information."""
-        self.training_steps += 1
-        
-        print("=" * 60)
-        print(f"🧠 {self.algorithm_name} - Training Step #{self.training_steps}")
-        print("=" * 60)
-        print(f"📊 Batch Size: {len(traces)} traces")
-        avg = (sum(rewards) / len(rewards)) if rewards else 0.0
-        rmin = min(rewards) if rewards else 0.0
-        rmax = max(rewards) if rewards else 0.0
-        print(f"📈 Average Reward: {avg:.3f}")
-        print(f"📊 Reward Range: [{rmin:.3f}, {rmax:.3f}]")
-        print()
-        print("📋 Training Data Summary:")
-        for i, (trace, reward) in enumerate(zip(traces, rewards)):
-            print(f"  Trace {i+1}: {len(trace)} turns, reward = {reward:.3f}")
-            # Show first few turns for each trace
-            for j, turn in enumerate(trace[:3]):  # Show first 3 turns
-                print(f"    Turn {j+1}:")
-                print(f"      Prompt: {turn['prompt_for_model'][:50]}...")
-                print(f"      Completion: {turn['model_completion'][:50]}...")
-                
-                # Show parsed completion details
-                parsed = turn['parsed_completion']
-                if parsed.get('thought'):
-                    thought_preview = parsed['thought'][:50] + "..." if len(parsed['thought']) > 50 else parsed['thought']
-                    print(f"      Thought: {thought_preview}")
-                if parsed.get('tool_code'):
-                    code_preview = parsed['tool_code'][:50] + "..." if len(parsed['tool_code']) > 50 else parsed['tool_code']
-                    print(f"      Tool Code: {code_preview}")
-                if parsed.get('final_answer'):
-                    answer_preview = parsed['final_answer'][:50] + "..." if len(parsed['final_answer']) > 50 else parsed['final_answer']
-                    print(f"      Final Answer: {answer_preview}")
-                
-                if turn['tool_output']:
-                    output_preview = turn['tool_output'][:50] + "..." if len(turn['tool_output']) > 50 else turn['tool_output']
-                    print(f"      Tool Output: {output_preview}")
-            
-            if len(trace) > 3:
-                print(f"    ... and {len(trace) - 3} more turns")
-            print()
-        
-        print()
-        print("🔄 Mock training completed. Real RL algorithm would update model weights here.")
-        print("=" * 60)
-
+from .adapters import SmolAgentAdapter, BaseAgentAdapter
+from .rl.grpo import GRPOAlgorithm 
+from smolagents import CodeAgent, TransformersModel
 
 class GRPOAlgorithm:
     """Lightweight trainer that wraps GRPO optimization around a Policy.
@@ -180,89 +113,123 @@ class GRPOAlgorithm:
 
 class Brain:
     """
-    Core training orchestrator for ToolBrain.
-    
-    The Brain now uses the Adapter pattern for clean separation of concerns.
-    Users pass an agent adapter that conforms to the BaseAgentAdapter interface,
-    making the system more explicit, testable, and extensible.
+    The all-in-one factory and trainer for ToolBrain agents.
+
+    This class hides all implementation details. Users interact with this
+    single class to configure, train, and retrieve their agent.
     """
     
-    def __init__(
-        self,
-        agent_adapter: BaseAgentAdapter,
-        reward_func: RewardFunction,
-        learning_algorithm: str = "MockRL"
-    ) -> None:
+    def __init__(self, config: Dict[str, Any]):
         """
-        Initialize the Brain with an agent adapter.
+        Initializes the entire system from a single configuration dictionary.
         
         Args:
-            agent_adapter: An adapter that conforms to BaseAgentAdapter interface
-            reward_func: Flexible reward function callable (see RewardFunction protocol)
-            learning_algorithm: Name of the RL algorithm to use
+            config (Dict[str, Any]): A dictionary containing all necessary settings.
+                Required keys:
+                    - "model_id": str (e.g., "HuggingFaceTB/SmolLM-135M-Instruct")
+                    - "tools": List[Callable]
+                    - "reward_func": RewardFunction
+                Optional keys:
+                    - "learning_algorithm": str (default: "GRPO")
+                    - "rl_config": dict (hyperparameters for the RL algorithm)
+                    - "max_turns": int (for the agent adapter)
         """
-        if not isinstance(agent_adapter, BaseAgentAdapter):
-            raise TypeError(
-                f"Expected BaseAgentAdapter instance, got {type(agent_adapter)}. "
-                "Use an adapter like SmolAgentAdapter to wrap your agent."
+        self.config = config
+        print("🧠 Initializing ToolBrain...")
+
+        # --- 1. Auto-initialize trainable model ---
+        model_id = self.config.get("model_id")
+        if not model_id:
+            raise ValueError("Config must include a 'model_id'.")
+        
+        print(f"   - Loading trainable model: {model_id}...")
+        self.model = TransformersModel(model_id=model_id)
+        print("   ✅ Model loaded.")
+
+        # --- 2. Auto-initialize base agent ---
+        tools = self.config.get("tools", [])
+        print(f"   - Initializing base CodeAgent with {len(tools)} tools...")
+        original_agent = CodeAgent(tools=tools, model=self.model)
+        print("   ✅ Base agent created.")
+
+        # --- 3. Auto-initialize internal adapter ---
+        print("   - Creating internal agent adapter...")
+        
+        self.agent_adapter = SmolAgentAdapter(
+            agent=original_agent,
+            max_turns=self.config.get("max_turns", 5)
+        )
+        print("   ✅ Adapter created.")
+
+        # --- 4. Auto-initialize RL module ---
+        learning_algorithm = self.config.get("learning_algorithm", "GRPO")
+        print(f"   - Initializing RL algorithm: {learning_algorithm}...")
+        
+        self.reward_func = self.config.get("reward_func")
+        if not self.reward_func:
+            raise ValueError("Config must include a 'reward_func'.")
+
+        if learning_algorithm == "GRPO":
+            policy = Policy(llm=self.model.model, tokenizer=self.model.tokenizer)
+            self.rl_module = GRPOAlgorithm(
+                policy=policy, 
+                config=self.config.get("rl_config", {})
             )
+        else:
+            raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
+        print("   ✅ RL module initialized.")
         
-        self.agent_adapter = agent_adapter
-        self.reward_func = reward_func
-        self.learning_algorithm = learning_algorithm
-        
-        self.rl_module: RLAlgorithm = MockRLAlgorithm(learning_algorithm)
-        
-        print(f"🧠 Brain initialized with {learning_algorithm} algorithm")
-        print(f"✅ Using agent adapter: {type(agent_adapter).__name__}")
-    
-    def train_step(
-        self,
-        query: str,
-        num_group_members: int = 10,
-        **reward_kwargs: Any
-    ) -> None:
+        print("\n✅ Brain is ready for training.")
+
+    def train(self, dataset: List[Dict[str, Any]], num_iterations: int = 10):
         """
-        Execute a single training step.
+        Runs the full training process on a dataset.
         
         Args:
-            query: The input query for the agent
-            num_group_members: Number of agent runs to collect for training
-            **reward_kwargs: Additional keyword arguments forwarded to reward_func
-                              (e.g., gold_answer, judge_client, constraints, etc.)
+            dataset: A list of training examples, where each example is a dict
+                     (e.g., {"query": "...", "gold_answer": "..."}).
+            num_iterations: The number of training iterations (epochs).
         """
-        print(f"\n🚀 Starting training step with query: '{query}'")
-        print(f"👥 Collecting {num_group_members} traces...")
+        print("\n🚀 Starting training...")
+        for i in range(num_iterations):
+            print(f"\n--- Iteration {i+1}/{num_iterations} ---")
+            
+            for example in dataset:
+                query = example.get("query")
+                if not query:
+                    continue
+                
+                self.train_step(query=query, reward_kwargs=example)
+        
+        print("\n🎉 Training finished!")
+
+    def train_step(self, query: str, reward_kwargs: Dict[str, Any]):
+        """Executes a single training step for a given query."""
+        num_group_members = self.config.get("num_group_members", 10)
         
         traces: List[Trace] = []
         rewards: List[float] = []
         
-        for i in range(num_group_members):
-            print(f"  🔄 Running agent iteration {i+1}/{num_group_members}...")
+        for _ in range(num_group_members):
             try:
                 trace = self.agent_adapter.run(query)
-                # Forward query and any provided kwargs to the reward function
-                reward = float(self.reward_func(trace=trace, query=query, **reward_kwargs))
+                reward = float(self.reward_func(trace=trace, **reward_kwargs))
                 traces.append(trace)
                 rewards.append(reward)
-                print(f"    ✅ Trace {i+1}: {len(trace)} steps, reward = {reward:.3f}")
             except Exception as e:
-                print(f"    ❌ Error in iteration {i+1}: {e}")
+                print(f"    ❌ Error during agent iteration: {e}")
                 continue
         
         if not traces:
-            raise RuntimeError("No successful traces collected for training")
-        
-        avg_reward = sum(rewards) / len(rewards)
-        print(f"\n📊 Collected {len(traces)} traces with average reward {avg_reward:.3f}")
+            print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
+            return
         
         self.rl_module.train_step(traces, rewards)
-        print("\n✅ Training step completed!")
-    
-    def get_training_stats(self) -> dict:
-        """Get current training statistics."""
-        return {
-            "algorithm": self.learning_algorithm,
-            "training_steps": self.rl_module.training_steps,
-            "adapter_type": type(self.agent_adapter).__name__
-        } 
+
+    def get_agent(self) -> CodeAgent:
+        """
+        Returns the trained agent.
+        
+        The returned agent contains the fine-tuned model.
+        """
+        return self.agent_adapter.agent
