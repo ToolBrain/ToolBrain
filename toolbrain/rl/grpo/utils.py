@@ -87,7 +87,7 @@ def build_inputs(
     # Normalize per-trace rewards across the batch (DeepSeekMath §4.1.2)
     normalized_rewards = compute_advantages(torch.tensor(rewards, dtype=torch.float32))  # shape: (B,)
 
-    for idx, (trace, reward) in enumerate(zip(traces, rewards)):
+    for idx, trace in enumerate(traces):
         seq_ids: List[int] = []
         seq_attn: List[int] = []
         seq_comp_mask: List[int] = []
