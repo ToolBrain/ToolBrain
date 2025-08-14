@@ -8,8 +8,12 @@ The Brain now uses the Adapter pattern for clean separation of concerns.
 """
 
 from typing import Any, Callable, List, Protocol
-from .core_types import Trace, TraceStep, RewardFunction
+import torch
+from torch.nn.utils import clip_grad_norm_
+from .core_types import Trace, RewardFunction
 from .adapters import BaseAgentAdapter
+from .grpo_utils import Policy, copy_model, build_inputs
+from .losses import grpo_loss
 
 
 class RLAlgorithm(Protocol):
@@ -83,13 +87,16 @@ class GRPOAlgorithm:
     """
     def __init__(
         self,
-        policy: Policy,
+        initial_policy: Policy,
+        ref_policy: Policy = None,
         config: dict = None,
     ) -> None:
-        self.policy = policy
+        self.policy = initial_policy
+        # the reference model, usually the initial Supervised Fine-Tuning model
+        self.pi_ref = ref_policy if ref_policy else copy_model(initial_policy) 
         self.config = config
         self.training_steps = 0
-        self.device = next(policy.llm.parameters()).device
+        self.device = next(initial_policy.llm.parameters()).device
         self.optimizer = torch.optim.AdamW(self.policy.llm.parameters(), lr=self.config["lr"])
 
     def _update_policy(self, pi_theta, loss):
@@ -107,13 +114,13 @@ class GRPOAlgorithm:
 
     def train_step(
         self,
-        traces: List[List[Example]],
+        traces: List[Trace],
         rewards: List[float],
     ) -> Policy:
         """Run one GRPO update over a batch of traces.
 
         Args:
-            traces: batch of traces; each trace is a list of (prompt, completion) pairs.
+            traces: batch of traces; each trace is a list Trace.
             rewards: list of scalar rewards, one per trace.
         Returns:
             Updated Policy (also stored in self.policy).
@@ -127,25 +134,39 @@ class GRPOAlgorithm:
             rewards=rewards,
             tokenizer=pi_theta.tokenizer
         )
-        input_ids = batch["input_ids"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
-        completion_mask = batch["completion_mask"].to(device)
-        advantages = batch["advantages"].to(device)
+ 
+        input_ids = batch.input_ids.to(device) # shape: (N, T)
+        attention_mask = batch.attention_mask.to(device) # shape: (N, T)
+        completion_mask = batch.completion_mask.to(device) # shape: (N, T)
+        advantages = batch.advantages.to(device) # shape: (N, T)
 
+        # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
+        #   - pi_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
+        #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
         with torch.no_grad():
-            pi_ref_logps = self.policy.get_log_probs(input_ids, attention_mask)
+            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
+            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
 
         for _ in range(self.config["mu"]):
-            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask)
+            # Current policy log-probs
+            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (N, T-1)
+
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_logps,
+                pi_theta_old_log_probs=pi_old_logps,
                 pi_ref_log_probs=pi_ref_logps,
-                advantages=advantages,
+                advantages=advantages[:,1:], # shape: (N, T-1)
                 epsilon=self.config["epsilon"],
                 beta=self.config["beta"],
-                completion_mask=completion_mask
+                completion_mask=completion_mask[:,1:], # shape: (N, T-1)
             )
+
+            # Apply update
             pi_theta = self._update_policy(pi_theta, loss)
+
+            # Cache current log-probs as next step's old-policy (detach from graph)
+            pi_old_logps = pi_theta_logps.detach()
+
         self.policy = pi_theta
         self.training_steps += 1
         return pi_theta
