@@ -5,7 +5,6 @@ from typing import List
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from ...core_types import Trace, Turn, ParsedCompletion
@@ -37,13 +36,6 @@ class GRPOBatch:
 
 def copy_model(model: nn.Module) -> nn.Module:
     return model.copy() if hasattr(model, 'copy') else deepcopy(model)
-
-def get_llm_and_tokenizer_from_smolagent(model_id: str):
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    llm = AutoModelForCausalLM.from_pretrained(model_id)
-    return llm, tokenizer
 
 def compute_advantages(rewards: torch.Tensor) -> torch.Tensor:
     """
@@ -209,10 +201,8 @@ class Policy(nn.Module):
 
 
 if __name__ == "__main__":
-    model_id = "gpt2"
-    llm, tokenizer = get_llm_and_tokenizer_from_smolagent(model_id=model_id)
-    policy_model = Policy(llm=llm, tokenizer=tokenizer)
-
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    # Traces
     traces: List[Trace] = [
         [
             Turn(
@@ -237,9 +227,19 @@ if __name__ == "__main__":
         ],
     ]
 
+    # Policy
+    model_id = "gpt2"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    llm = AutoModelForCausalLM.from_pretrained(model_id)
+    policy_model = Policy(llm=llm, tokenizer=tokenizer)
+
+    # Rewards
     rewards = torch.rand(len(traces))
     print(f"Rewards: {rewards}")
 
+    # GRPOBatch
     batch = build_inputs(traces=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
     input_ids = batch.input_ids
     attention_mask = batch.attention_mask
@@ -256,6 +256,7 @@ if __name__ == "__main__":
     print("Shape of advantages:", advantages.shape)
     print("Decoded first trace:", tokenizer.decode(input_ids[0]))
 
+    # Log Probs
     log_probs = policy_model.get_log_probs(input_ids, attention_mask)  # (B, L-1)
     log_probs_chunked = policy_model.get_log_probs(input_ids, attention_mask, chunk_len=128)  # (B, L-1)
     print("Log probabilities shape:", log_probs.shape)

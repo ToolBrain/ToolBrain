@@ -8,7 +8,6 @@ from torch.nn.utils import clip_grad_norm_
 from .utils import (
     Policy,
     copy_model,
-    get_llm_and_tokenizer_from_smolagent,
     build_inputs
 )
 from .losses import grpo_loss
@@ -155,8 +154,9 @@ class GRPOAlgorithm:
 
 
 if __name__ == "__main__":
-    llm, tokenizer = get_llm_and_tokenizer_from_smolagent("gpt2")
-    initial_policy = Policy(llm=llm, tokenizer=tokenizer)
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    # Traces
     traces: List[Trace] = [
         [
             Turn(
@@ -180,7 +180,19 @@ if __name__ == "__main__":
             )
         ],
     ]
+
+    # Policy
+    model_id = "gpt2"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    llm = AutoModelForCausalLM.from_pretrained(model_id)
+    initial_policy = Policy(llm=llm, tokenizer=tokenizer)
+
+    # Rewards
     rewards = torch.rand(len(traces))
+
+    # Config
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
