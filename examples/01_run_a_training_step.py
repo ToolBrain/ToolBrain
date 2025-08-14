@@ -17,12 +17,30 @@ from toolbrain.rewards import reward_exact_match
 # --- 1. Define Tools and Reward Function (User-defined) ---
 @tool
 def add(a: int, b: int) -> int:
-    """Adds two numbers."""
+    """
+    Add two integers.
+
+    Args:
+        a (int): First addend.
+        b (int): Second addend.
+
+    Returns:
+        int: Sum of a and b.
+    """
     return a + b
 
 @tool
 def multiply(a: int, b: int) -> int:
-    """Multiplies two numbers."""
+    """
+    Multiply two integers.
+
+    Args:
+        a (int): First factor.
+        b (int): Second factor.
+
+    Returns:
+        int: Product of a and b.
+    """
     return a * b
 
 # --- 2. Prepare Training Data ---
@@ -42,16 +60,27 @@ def main():
     print("🧠 ToolBrain Flexible Training Example")
     print("=" * 60)
 
-    # --- 3. User creates their agent freely ---
-    print("🤖 User is creating their own agent...")
-    # User must use TransformersModel to train
-    trainable_model = TransformersModel(model_id="HuggingFaceTB/SmolLM-135M-Instruct")
-    
-    my_agent = CodeAgent(
-        tools=[add, multiply],
-        model=trainable_model
-    )
-    print("✅ Agent created.")
+    # --- 3. Define Brain Configuration ---
+    # User defines a single dictionary
+    toolbrain_config = {
+        # Trainable model (downloaded locally)
+        #"model_id": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "model_id": "gpt2",
+        "tools": [add, multiply],
+        "reward_func": reward_exact_match, # Select a reward function
+        "learning_algorithm": "GRPO",
+        
+        # Optional parameters
+        "num_group_members": 4, # Traces per query
+        "rl_config": {
+            "epsilon": 0.2,
+            "beta": 0.04,
+            "opt_steps": 1,
+            "lr": 1e-5, 
+            "max_grad_norm" :1.0, 
+            "chunk_len": None, 
+        }
+    }
 
     # --- 4. Initialize Brain and Train ---
     # User only needs to pass their agent to Brain
