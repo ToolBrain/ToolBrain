@@ -1,12 +1,15 @@
 from copy import deepcopy
+from dataclasses import dataclass
+from typing import List
+
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from torch.nn.utils.rnn import pad_sequence
-from typing import NamedTuple, List, Tuple, TypedDict, Optional, Dict, Any
-from dataclasses import dataclass
+
 from .core_types import Trace, Turn, ParsedCompletion
+
 
 @dataclass(frozen=True)
 class GRPOBatch:
@@ -31,7 +34,6 @@ class GRPOBatch:
             completion_mask=self.completion_mask[:, 1:],
             advantages=self.advantages[:, 1:],
         )
-
 
 def copy_model(model: nn.Module) -> nn.Module:
     return model.copy() if hasattr(model, 'copy') else deepcopy(model)
@@ -71,22 +73,25 @@ def build_inputs(
         rewards: A list of reward-per-trace (final reward). The same scalar is expanded along the time dimension of that trace.
 
     Returns:
-        GRPOBatch(input_ids, attention_mask, completion_mask, advantages):
-            - input_ids: (B, T_max)
-            - attention_mask: (B, T_max), 1 for real tokens, 0 for pad
-            - completion_mask: (B, T_max), 1 only on tokens from model_completion across all turns; 0 for prompt_for_model & tool_output
-            - advantages: (B, T_max) normalized rewards expanded per token
+        Batch(input_ids, attention_mask, completion_mask, advantages):
+            - input_ids: (B, L_max)
+            - attention_mask: (B, L_max), 1 for real tokens, 0 for pad
+            - completion_mask: (B, L_max), 1 only on tokens from model_completion across all turns; 0 for prompt_for_model & tool_output
+            - advantages: (B, L_max) per-trace **normalized** rewards (computed over the unpadded B traces) expanded to token level; padded positions are 0.0
     """
     all_input_ids: List[List[int]] = []
     all_attention_masks: List[List[int]] = []
     all_completion_mask: List[List[int]] = []
-    all_rewards: List[List[float]] = []
+    all_advantages: List[List[float]] = []
 
-    for trace, reward in zip(traces, rewards):
+    # Normalize per-trace rewards across the batch (DeepSeekMath §4.1.2)
+    normalized_rewards = compute_advantages(torch.tensor(rewards, dtype=torch.float32))  # shape: (B,)
+
+    for idx, (trace, reward) in enumerate(zip(traces, rewards)):
         seq_ids: List[int] = []
         seq_attn: List[int] = []
         seq_comp_mask: List[int] = []
-        seq_rewards: List[float] = []
+        seq_advs: List[float] = []
 
         for turn in trace:
             prompt = turn.get("prompt_for_model", "")
@@ -109,14 +114,14 @@ def build_inputs(
             # Completion mask: 1 only for model_completion tokens
             seq_comp_mask.extend([0] * len(prompt_ids) + [1] * len(model_ids) + [0] * len(tool_ids))
 
-            # Expand the per-trace reward along this turn's tokens
-            seq_rewards.extend([reward] * len(turn_ids))
+            # Expand the per-trace normalized reward along this turn's tokens
+            seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
 
         # Accumulate per-trace sequences
         all_input_ids.append(seq_ids)
         all_attention_masks.append(seq_attn)
         all_completion_mask.append(seq_comp_mask)
-        all_rewards.append(seq_rewards)
+        all_advantages.append(seq_advs)
 
     # Pad to batch-first tensors
     input_ids = pad_sequence(
@@ -134,30 +139,42 @@ def build_inputs(
         batch_first=True,
         padding_value=0,
     )
-    rewards_tensor = pad_sequence(
-        [torch.tensor(seq, dtype=torch.float) for seq in all_rewards],
+    advantages = pad_sequence(
+        [torch.tensor(seq, dtype=torch.float) for seq in all_advantages],
         batch_first=True,
         padding_value=0.0,
     )
 
-    # Normalize to get advantages
-    advantages = compute_advantages(rewards_tensor)
+    return GRPOBatch(input_ids, attention_mask, completion_mask, advantages)
 
-    return GRPOBatch(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        completion_mask=completion_mask,
-        advantages=advantages
-    )
+def get_per_token_logps(
+    logits: torch.Tensor,          # (B, L-1, V)
+    input_ids: torch.Tensor,       # (B, L-1)
+    chunk_len: int | None = None,  # if set, compute along L in chunks to reduce peak memory
+) -> torch.Tensor:
+    """
+    Return per-token log-probs aligned with targets.
+    - logits: (B, L-1, V)
+    - input_ids: (B, L-1)
+    - chunk_len: optional chunk size along L for memory-friendly computation
+    Returns: (B, L-1)
+    """
+    if chunk_len is None:
+        lp = logits.log_softmax(dim=-1)  # (B, L-1, V)
+        return lp.gather(dim=-1, index=input_ids.long().unsqueeze(-1)).squeeze(-1)  # (B, L-1)
 
-
-def get_per_token_logps(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
-    per_token_logps = [] # Use a loop to reduce memory peak.
-    for logits_row, input_ids_row in zip(logits, input_ids):
-        log_probs = logits_row.log_softmax(dim=-1)
-        token_log_prob = torch.gather(log_probs, dim=1, index=input_ids_row.unsqueeze(1)).squeeze(1)
-        per_token_logps.append(token_log_prob)
-    return torch.stack(per_token_logps)
+    # Chunked path along sequence length
+    chunk_outputs: list[torch.Tensor] = []
+    target_len = input_ids.size(1)
+    for start_idx in range(0, target_len, chunk_len):
+        end_idx = min(start_idx + chunk_len, target_len)
+        lp = logits[:, start_idx:end_idx, :].log_softmax(dim=-1)  # (B, C, V)
+        chunk_outputs.append(
+            lp.gather(
+                dim=-1,
+                index=input_ids[:, start_idx:end_idx].long().unsqueeze(-1)).squeeze(-1)
+        )  # (B, C)
+    return torch.cat(chunk_outputs, dim=1)  # (B, L-1)
 
 class Policy(nn.Module):
     def __init__(self, llm, tokenizer) -> None:
@@ -165,18 +182,24 @@ class Policy(nn.Module):
         self.llm = llm
         self.tokenizer = tokenizer
 
-    def get_log_probs(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        """Return per-token log-probs aligned for causal LM loss (predict token t from context up to t-1).
-        Output shape: (N, T-1).
+    def get_log_probs(self,
+                      input_ids: torch.Tensor,
+                      attention_mask: torch.Tensor,
+                      chunk_len: int | None = None) -> torch.Tensor:
+        """Return per-token log-probs aligned for causal LM loss
+        (predict token t from context up to t-1).
+        Output shape: (B, L-1).
         """
-        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # (N, T, V)
+        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # (B, L, V)
         
-        # Exclude the last logit because it has no corresponding target token (there is no "next token" after the last one)
-        logits = logits[:, :-1, :]   # shape: (N, T-1, V)
-        # Exclude the first token in input_ids because its prediction is based on the context before it (no preceding token)
-        input_ids = input_ids[:, 1:] # shape: (N, T-1)
+        # Exclude the last logit because it has no corresponding target token
+        # (there is no "next token" after the last one)
+        logits = logits[:, :-1, :]   # shape: (B, L-1, V)
+        # Exclude the first token in input_ids because its prediction is based on
+        # the context before it (no preceding token)
+        input_ids = input_ids[:, 1:] # shape: (B, L-1)
 
-        per_token_logps = get_per_token_logps(logits, input_ids)  # (N, T-1)
+        per_token_logps = get_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # (B, L-1)
         return per_token_logps
 
 
@@ -226,20 +249,22 @@ if __name__ == "__main__":
     print("Shape of advantages:", advantages.shape)
     print("Decoded first trace:", tokenizer.decode(input_ids[0]))
 
-    # Align masks/advantages for causal loss (match T-1 length)
+    log_probs = policy_model.get_log_probs(input_ids, attention_mask)  # (B, L-1)
+    log_probs_chunked = policy_model.get_log_probs(input_ids, attention_mask, chunk_len=128)  # (B, L-1)
+    print("Log probabilities shape:", log_probs.shape)
+    print("Log probabilities chunked shape:", log_probs_chunked.shape)
+
+    # Align masks/advantages for causal loss (match L-1 length)
     input_ids_loss = input_ids[:, 1:]
     attention_mask_loss = attention_mask[:, 1:]
     completion_mask_loss = completion_mask[:, 1:]
     advantages_loss = advantages[:, 1:]
-
-    log_probs = policy_model.get_log_probs(input_ids, attention_mask)  # (N, T-1)
 
     # Sanity checks
     assert log_probs.shape == input_ids_loss.shape, f"log_probs {log_probs.shape} vs labels {input_ids_loss.shape}"
     assert completion_mask_loss.shape == log_probs.shape, "completion_mask not aligned with shifted logits"
     assert advantages_loss.shape == log_probs.shape, "advantages not aligned with shifted logits"
 
-    print("Log probabilities shape:", log_probs.shape)
     print("Completion mask (row 0, shifted):", completion_mask_loss[0])
     print("#model tokens row0 (shifted):", int(completion_mask_loss[0].sum().item()))
     print("#total tokens row0 (shifted):", int(attention_mask_loss[0].sum().item()))
