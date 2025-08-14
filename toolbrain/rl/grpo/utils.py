@@ -85,7 +85,7 @@ def build_inputs(
     all_advantages: List[List[float]] = []
 
     # Normalize per-trace rewards across the batch (DeepSeekMath §4.1.2)
-    normalized_rewards = compute_advantages(torch.tensor(rewards, dtype=torch.float32))  # shape: (B,)
+    normalized_rewards = compute_advantages(rewards)  # shape: (B,)
     
     for idx, trace in enumerate(traces):
         seq_ids: List[int] = []
@@ -152,7 +152,7 @@ def build_inputs(
         advantages=advantages
     )
 
-def get_per_token_logps(
+def compute_per_token_logps(
     logits: torch.Tensor,          # (B, L-1, V)
     input_ids: torch.Tensor,       # (B, L-1)
     chunk_len: int | None = None,  # if set, compute along L in chunks of C tokens to reduce peak memory
@@ -204,7 +204,7 @@ class Policy(nn.Module):
         # the context before it (no preceding token)
         input_ids = input_ids[:, 1:] # shape: (B, L-1)
 
-        per_token_logps = get_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # shape: (B, L-1)
+        per_token_logps = compute_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # shape: (B, L-1)
         return per_token_logps
 
 

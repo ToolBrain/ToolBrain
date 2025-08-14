@@ -5,10 +5,33 @@ from typing import List
 import torch
 from torch.nn.utils import clip_grad_norm_
 
-from .utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
+from .utils import (
+    Policy,
+    copy_model,
+    get_llm_and_tokenizer_from_smolagent,
+    build_inputs
+)
 from .losses import grpo_loss
 from ...core_types import Trace, Turn, ParsedCompletion
 
+def validate_config(config: dict) -> None:
+    """
+    Validate that the config dict contains exactly the required keys.
+    Raises:
+        ValueError: If any required keys are missing or extra keys are present.
+    """
+    required_keys = {
+        "epsilon",
+        "beta",
+        "opt_steps",
+        "lr",
+        "max_grad_norm",
+        "chunk_len"
+    }
+    
+    for key in required_keys:
+        if key not in config.keys():
+            raise ValueError(f"Invalid config: missing '{key}'")
 
 class GRPOAlgorithm:
     """Lightweight trainer that wraps GRPO optimization around a Policy.
@@ -20,13 +43,17 @@ class GRPOAlgorithm:
     def __init__(
         self,
         initial_policy: Policy,
+        config: dict,
         ref_policy: Policy = None,
-        config: dict = None,
     ) -> None:
         self.policy = initial_policy
+
         # the reference model, usually the initial Supervised Fine-Tuning model
-        self.pi_ref = ref_policy if ref_policy else copy_model(initial_policy) 
+        self.pi_ref = ref_policy if ref_policy else copy_model(initial_policy)
+
+        validate_config(config)
         self.config = config
+
         self.training_steps = 0
         self.device = next(initial_policy.llm.parameters()).device
         self.optimizer = torch.optim.AdamW(self.policy.llm.parameters(), lr=self.config["lr"])
@@ -52,7 +79,7 @@ class GRPOAlgorithm:
 
     def train_step(
         self,
-        traces: List[List[Turn]],
+        traces: List[Trace],
         rewards: List[float],
     ) -> Policy:
         """Run one GRPO update over a batch of traces.
@@ -65,7 +92,7 @@ class GRPOAlgorithm:
         """
         device = self.device
         pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
-        assert len(traces) == len(rewards)
+        assert len(traces) == len(rewards), f"Length of traces and rewards must be the same. Received {len(traces)} traces, {len(rewards)} rewards."
 
         batch = build_inputs(
             traces=traces,
@@ -119,7 +146,6 @@ class GRPOAlgorithm:
 
         self.policy = pi_theta
         self.training_steps += 1
-        return pi_theta
 
     def __repr__(self) -> str:
         return (
