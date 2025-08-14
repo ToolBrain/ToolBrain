@@ -63,8 +63,7 @@ def main():
     # --- 3. User creates their agent freely ---
     print("🤖 User is creating their own agent...")
     # User must use TransformersModel to train
-    #trainable_model = TransformersModel(model_id="HuggingFaceTB/SmolLM-135M-Instruct")
-    trainable_model = TransformersModel(model_id="gpt2")
+    trainable_model = TransformersModel(model_id="HuggingFaceTB/SmolLM-135M-Instruct")
     
     
     my_agent = CodeAgent(
