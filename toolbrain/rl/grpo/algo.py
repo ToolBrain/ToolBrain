@@ -7,7 +7,7 @@ from torch.nn.utils import clip_grad_norm_\
 
 from .utils import Policy, copy_model, get_llm_and_tokenizer_from_smolagent, build_inputs
 from .losses import grpo_loss
-from ...core_types import Turn, ParsedCompletion
+from ...core_types import Trace, Turn, ParsedCompletion
 
 
 class GRPOAlgorithm:
@@ -75,13 +75,14 @@ class GRPOAlgorithm:
         # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
         #   - pi_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
         #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
+        chunk_len = config["chunk_len"]
         with torch.no_grad():
-            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (B, L-1)
-            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask) # shape: (B, L-1)
+            pi_old_logps = pi_theta.get_log_probs(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
+            pi_ref_logps = self.pi_ref.get_log_probs(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
 
         for _ in range(self.config["mu"]):
             # Current policy log-probs
-            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask) # shape: (B, L-1)
+            pi_theta_logps = pi_theta.get_log_probs(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
 
             loss = grpo_loss(
                 pi_theta_log_probs=pi_theta_logps,
@@ -111,13 +112,9 @@ class GRPOAlgorithm:
 
 
 if __name__ == "__main__":
-    def compute_reward(trace):
-        # Placeholder: assign a random scalar per-trace reward
-        return torch.rand(1, dtype=torch.float32).item()
-
     llm, tokenizer = get_llm_and_tokenizer_from_smolagent("gpt2")
     initial_policy = Policy(llm=llm, tokenizer=tokenizer)
-    traces: List[List[Turn]] = [
+    traces: List[Trace] = [
         [
             Turn(
                 prompt_for_model="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
@@ -140,13 +137,14 @@ if __name__ == "__main__":
             )
         ],
     ]
-    rewards = [compute_reward(trace) for trace in traces]
+    rewards = torch.rand(len(traces))
     config = {
         "epsilon": 0.2, # clipping parameter
         "beta": 0.04, # KL divergence penalty coefficient
         "mu": 3, # Number of GRPO optimization steps per batch
         "lr": 1e-5, # Learning rate for optimizer
         "max_grad_norm" :1.0, 
+        "chunk_len": 128, # If not None, get_per_token_logps will process in chunks
     }
 
     algo = GRPOAlgorithm(

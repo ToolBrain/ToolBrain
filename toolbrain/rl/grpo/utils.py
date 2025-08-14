@@ -237,7 +237,9 @@ if __name__ == "__main__":
         ],
     ]
 
-    rewards = [1.0] * len(traces)
+    rewards = torch.rand(len(traces))
+    print(f"Rewards: {rewards}")
+
     batch = build_inputs(traces=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
     input_ids = batch.input_ids
     attention_mask = batch.attention_mask
