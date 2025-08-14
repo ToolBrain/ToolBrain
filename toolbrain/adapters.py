@@ -48,14 +48,14 @@ class SmolAgentAdapter(BaseAgentAdapter):
 
     def run(self, query: str) -> Trace:
         full_trace: Trace = []
-        current_context = self._build_initial_prompt(query)
-        
+        history: Trace = []
+
         for turn_number in range(self.max_turns):
-            prompt_for_this_turn = current_context
+            prompt_for_this_turn = self._build_prompt_for_turn(query, history)
+            
             model_completion_string = self._get_llm_completion(prompt_for_this_turn)
-
             print(f"    DEBUG [Turn {turn_number+1}] LLM Raw Output:\n---\n{model_completion_string}\n---")
-
+            
             parsed_completion = self._parse_model_completion(model_completion_string)
             
             tool_output_string = None
@@ -70,11 +70,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
             }
             full_trace.append(current_turn)
             
-            current_context = self._update_context_for_next_turn(
-                current_context, 
-                model_completion_string, 
-                tool_output_string
-            )
+            history.append(current_turn)
             
             if parsed_completion.get("final_answer"):
                 break
@@ -85,39 +81,44 @@ class SmolAgentAdapter(BaseAgentAdapter):
         
         return full_trace
 
-    def _build_initial_prompt(self, query: str) -> str:
+    def _build_prompt_for_turn(self, query: str, history: Trace) -> str:
+        """Builds the prompt for the current turn based on history."""
+        
+        tool_definitions_str = self._get_tool_definitions()
+        
+        initial_prompt = f"""You are a helpful AI assistant that thinks step-by-step to solve problems using tools.
+
+Here are the tools available:
+{tool_definitions_str}
+
+You MUST respond in the following format:
+Thought: Your reasoning for the next step.
+Code: The Python code to execute for the next step.
+OR
+Final Answer: The final answer to the user's query. 
+
+---
+User Query: {query}
+"""
+        history_str = self._format_history_for_prompt(history)
+        
+        return initial_prompt + history_str + "\nThought:"
+
+    def _get_tool_definitions(self) -> str:
         tool_definitions = []
         if hasattr(self.agent, 'tools') and isinstance(self.agent.tools, dict):
             for tool_name, tool_func in self.agent.tools.items():
                 docstring = getattr(tool_func, '__doc__', None) or "No description available."
                 tool_definitions.append(f"- {tool_name}: {docstring.strip()}")
-        
-        tool_definitions_str = "\n".join(tool_definitions)
-        
-        return f"""You are a helpful AI assistant that strictly follows instructions.
+        return "\n".join(tool_definitions)
 
-Here are the tools available:
-{tool_definitions_str}
-
-You MUST respond in the following format. Do not add any other text.
-Thought: Your step-by-step reasoning and plan.
-Code: The Python code to execute ONE tool call.
-Final Answer: The final answer to the user's query.
-
----
-EXAMPLE 1:
-User Query: What is 8 multiplied by 6?
-
-Thought: The user wants to multiply two numbers. I have a `multiply` tool. I will call it with the arguments 8 and 6.
-Code:
-print(multiply(8, 6))
-
----
-NOW, SOLVE THE FOLLOWING TASK. REMEMBER TO FOLLOW THE FORMAT EXACTLY.
-
-User Query: {query}
-
-Thought:"""
+    def _format_history_for_prompt(self, history: Trace) -> str:
+        parts = []
+        for turn in history:
+            parts.append(turn["model_completion"])
+            if turn["tool_output"]:
+                parts.append(f"\nTool Output:\n{turn['tool_output']}")
+        return "\n".join(parts)
 
     def _get_llm_completion(self, prompt: str) -> str:
         if not self.client:
@@ -164,7 +165,9 @@ Thought:"""
     def _execute_tool_code(self, tool_code: str) -> Optional[str]:
         print(f"  🔧 Executing tool code: '{tool_code}'")
         try:
-            execution_scope = {}
+            execution_scope = {
+                "__builtins__": __builtins__
+            }
             execution_scope.update(self.agent.tools)
 
             output_capture = io.StringIO()
@@ -176,8 +179,3 @@ Thought:"""
         except Exception as e:
             return f"Error executing tool code: {str(e)}"
 
-    def _update_context_for_next_turn(self, current_context: str, model_completion: str, tool_output: Optional[str]) -> str:
-        new_context = current_context + model_completion
-        if tool_output:
-            new_context += f"\nTool Output:\n{tool_output}"
-        return new_context

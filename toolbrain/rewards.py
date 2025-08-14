@@ -9,7 +9,6 @@ cases without a single gold answer.
 from typing import Any, Optional
 from .core_types import Trace
 
-
 def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
     """
     Reward 1.0 if the final answer exactly matches the provided gold_answer, else 0.0.
