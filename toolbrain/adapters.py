@@ -22,7 +22,7 @@ class BaseAgentAdapter(ABC):
         """Execute a query and return a structured execution trace."""
         pass
 
-    @abstractabstractmethod
+    @abstractmethod
     def get_trainable_model(self) -> TransformersModel:
         """Return the underlying trainable model from the agent."""
         pass
@@ -123,7 +123,6 @@ User Query: {query}
 
     def _get_llm_completion(self, prompt: str) -> str:
         try:
-            # Gọi trực tiếp model local đã được tải
             response = self.agent.model.generate(
                 messages=[{"role": "user", "content": prompt}],
                 stop_sequences=["Tool Output:", "Observation:"]

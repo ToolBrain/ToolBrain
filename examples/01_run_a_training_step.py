@@ -29,7 +29,7 @@ def multiply(a: int, b: int) -> int:
 training_dataset = [
     {
         "query": "Use the add tool to calculate 5 + 7",
-        "gold_answer": "12"
+        "gold_answer": "12" 
     },
     {
         "query": "What is 8 multiplied by 6?",
