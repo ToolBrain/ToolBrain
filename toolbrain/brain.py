@@ -33,7 +33,11 @@ class Brain:
         self.config = brain_config
         self.reward_func = reward_func
         self.learning_algorithm = learning_algorithm
-        print(f"🧠 Initializing Brain for agent of type '{type(agent).__name__}'...")
+        
+        # Store original agent type for flexible return in get_agent()
+        self.original_agent_type = type(agent)
+        
+        print(f"🧠 Initializing Brain for agent of type '{self.original_agent_type.__name__}'...")
 
         # --- "Adapter Factory" automatically ---
         self.agent_adapter = self._get_adapter_for_agent(agent)
@@ -92,17 +96,21 @@ class Brain:
 
     def train_step(self, query: str, reward_kwargs: Dict[str, Any]):
         """Executes a single training step for a given query."""
+        print(f"\n🔄 Training step for query: '{query[:50]}...'")
         num_group_members = self.config.get("num_group_members", 10)
         
         traces: List[Trace] = []
         rewards: List[float] = []
         
-        for _ in range(num_group_members):
+        print(f"  📊 Collecting {num_group_members} traces...")
+        for i in range(num_group_members):
             try:
+                print(f"    📝 Trace {i+1}/{num_group_members}")
                 trace = self.agent_adapter.run(query)
                 reward = float(self.reward_func(trace=trace, **reward_kwargs))
                 traces.append(trace)
                 rewards.append(reward)
+                print(f"      🎯 Reward: {reward:.3f}")
             except Exception as e:
                 print(f"    ❌ Error during agent iteration: {e}")
                 continue
@@ -111,12 +119,63 @@ class Brain:
             print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
             return
         
+        print(f"  🧠 Running RL training step with {len(traces)} traces...")
         self.rl_module.train_step(traces, rewards)
+        print(f"  ✅ RL training step completed")
 
-    def get_agent(self) -> CodeAgent:
+    def get_agent(self) -> Any:
         """
-        Returns the trained agent.
+        Returns the trained agent with the same type as the input agent.
         
-        The returned agent contains the fine-tuned model.
+        The returned agent contains the fine-tuned model and preserves
+        the original agent's interface and methods. This method is flexible
+        and works with any agent type supported by ToolBrain adapters.
+        
+        Returns:
+            The trained agent with the same type as the original input agent.
+            For example:
+            - If input was CodeAgent -> returns CodeAgent
+            - If input was ConversableAgent -> returns ConversableAgent
+            - If input was CustomAgent -> returns CustomAgent
         """
         return self.agent_adapter.agent
+    
+    def get_agent_type(self) -> type:
+        """
+        Returns the original agent type that was passed to the Brain.
+        
+        This is useful for type checking or understanding what type
+        of agent the Brain is working with.
+        
+        Returns:
+            The type of the original agent (e.g., CodeAgent, ConversableAgent, etc.)
+        """
+        return self.original_agent_type
+    
+    @staticmethod
+    def is_agent_supported(agent: Any) -> bool:
+        """
+        Check if an agent type is supported by ToolBrain.
+        
+        This method can be used to validate agent compatibility
+        before creating a Brain instance.
+        
+        Args:
+            agent: The agent instance to check
+            
+        Returns:
+            True if the agent type is supported, False otherwise
+        """
+        try:
+            # Try to get adapter for the agent
+            if isinstance(agent, CodeAgent):
+                return True
+            # Future: add more agent type checks here
+            # elif isinstance(agent, ConversableAgent):
+            #     return True
+            # elif isinstance(agent, LLMChain):
+            #     return True
+            else:
+                return False
+        except Exception:
+            return False

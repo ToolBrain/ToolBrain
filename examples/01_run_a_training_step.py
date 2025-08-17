@@ -10,7 +10,7 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from smolagents import CodeAgent, TransformersModel, tool
+from smolagents import CodeAgent, TransformersModel, tool, ChatMessage, MessageRole
 from toolbrain import Brain
 from toolbrain.rewards import reward_exact_match
 
@@ -60,17 +60,38 @@ def main():
     print("🧠 ToolBrain Flexible Training Example")
     print("=" * 60)
 
-    # --- 3. User creates their agent freely ---
     print("🤖 User is creating their own agent...")
-    # User must use TransformersModel to train
+   
+    print("📥 Initializing TransformersModel...")
     trainable_model = TransformersModel(model_id="HuggingFaceTB/SmolLM-135M-Instruct")
+    print("✅ TransformersModel initialized.")
     
-    
+    print("🔧 Creating CodeAgent...")
     my_agent = CodeAgent(
         tools=[add, multiply],
         model=trainable_model
     )
     print("✅ Agent created.")
+
+    print("🔄 Testing model loading with a simple generation...")
+    try:
+        test_content = [{"type": "text", "text": "Hello"}]
+        test_messages = [ChatMessage(role=MessageRole.USER, content=test_content)]
+        
+        
+        test_response_object = trainable_model.generate(
+            messages=test_messages,
+            max_new_tokens=10
+        )
+        
+        
+        test_response_string = test_response_object.content if hasattr(test_response_object, 'content') else str(test_response_object)
+
+        print(f"✅ Model loaded successfully! Test response: {test_response_string[:50]}...")
+    except Exception as e:
+        print(f"⚠️ Model loading test failed: {e}")
+        import traceback
+        traceback.print_exc()
 
     # --- 4. Initialize Brain and Train ---
     # User only needs to pass their agent to Brain

@@ -27,6 +27,7 @@ dependencies = [
     "openai>=1.0.0",
     "typing-extensions>=4.0.0",
     "python-dotenv>=1.0.0",
+    "RestrictedPython>=8.0"
 ]
 
 [project.optional-dependencies]
