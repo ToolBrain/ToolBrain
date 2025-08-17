@@ -106,7 +106,7 @@ def build_inputs(
         seq_comp_mask: List[int] = []
         seq_advs: List[float] = []
 
-        for turn in trace:
+        for i, turn in enumerate(trace):
             # Coerce possible non-string fields (None/dict/list/number) to string
             prompt = _to_text(turn.get("prompt_for_model", ""))
             model_text = _to_text(turn.get("model_completion", ""))
@@ -118,8 +118,14 @@ def build_inputs(
             tool_ids = tokenizer.encode(tool_text, add_special_tokens=False)
 
             # Append in the order actually seen by the model/logging
-            # [prompt_for_model][model_completion][tool_output]
-            turn_ids = prompt_ids + model_ids + tool_ids
+            # For n turn, we need: P1 C1 O1 C2 O2 ... Cn On
+            # (where P is prompt, C is model_completion, O is tool_output)
+            if i == 0:
+                # For the first turn, we include the prompt_for_model
+                turn_ids = prompt_ids + model_ids + tool_ids
+            else:
+                # For subsequent turns, we only use the model completion to avoid duplicating the prompt
+                turn_ids = model_ids + tool_ids
 
             # Make sure pad_sequence will not crash if input_ids is empty
             if len(turn_ids) == 0:
@@ -135,7 +141,12 @@ def build_inputs(
                 seq_attn.extend([1] * len(turn_ids))
 
                 # Completion mask: 1 only for model_completion tokens
-                seq_comp_mask.extend([0] * len(prompt_ids) + [1] * len(model_ids) + [0] * len(tool_ids))
+                if i == 0:
+                    # For the first turn, model_completion is the second segment
+                    seq_comp_mask.extend([0] * len(prompt_ids) + [1] * len(model_ids) + [0] * len(tool_ids))
+                else:
+                    # For subsequent turns, model_completion is the first segment
+                    seq_comp_mask.extend([1] * len(model_ids) + [0] * len(tool_ids))
 
                 # Expand the per-trace normalized reward along this turn's tokens
                 seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
