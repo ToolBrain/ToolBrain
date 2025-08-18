@@ -1,5 +1,5 @@
 # Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
-
+import copy
 from typing import List
 
 import torch
@@ -46,7 +46,7 @@ class GRPOAlgorithm:
         self.policy = initial_policy
         self.policy = self.policy.to(self.device)
 
-        self.pi_ref = ref_policy if ref_policy else initial_policy.copy()
+        self.pi_ref = ref_policy if ref_policy else copy.deepcopy(initial_policy)
         self.pi_ref = self.pi_ref.to(self.device)
 
         validate_config(config)

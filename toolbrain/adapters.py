@@ -7,12 +7,15 @@ agent libraries compatible with ToolBrain's trace-based training system.
 
 from abc import ABC, abstractmethod
 from typing import Optional, List, Any
+
+from peft import get_peft_model
 from smolagents import CodeAgent, TransformersModel, ChatMessage, MessageRole
 import io
 import contextlib
 import re
 
 from .core_types import Trace, Turn, ParsedCompletion
+
 
 class BaseAgentAdapter(ABC):
     """Abstract base class for agent adapters."""
@@ -27,16 +30,17 @@ class BaseAgentAdapter(ABC):
         """Return the underlying trainable model from the agent."""
         pass
 
+
 class SmolAgentAdapter(BaseAgentAdapter):
     """Adapter for smolagents CodeAgent using a local TransformersModel."""
     
-    def __init__(self, agent: CodeAgent, max_turns: int = 5):
+    def __init__(self, agent: CodeAgent, config):
         """
         Initialize the SmolAgentAdapter.
         
         Args:
             agent: A smolagents CodeAgent instance configured with a TransformersModel.
-            max_turns: Maximum number of interaction turns.
+            config: general config
         """
         if not isinstance(agent, CodeAgent):
             raise TypeError(f"Expected CodeAgent instance, got {type(agent)}")
@@ -44,7 +48,8 @@ class SmolAgentAdapter(BaseAgentAdapter):
             raise TypeError("Training is only supported for agents using a local smolagents.TransformersModel.")
         
         self.agent = agent
-        self.max_turns = max_turns
+        self.config = config
+        self._set_lora_finetuning()
         print("✅ SmolAgentAdapter: Initialized for local model training.")
 
     def get_trainable_model(self) -> TransformersModel:
@@ -164,3 +169,16 @@ class SmolAgentAdapter(BaseAgentAdapter):
             full_text_parts.append(f"--- {role} ---\n{content_text}")
             
         return "\n".join(full_text_parts)
+
+    def _set_lora_finetuning(self):
+        lora_config = self.config.get("lora_config", None)
+        if lora_config:
+            hf_model = get_peft_model(self.agent.model.model, lora_config)
+            self.agent.model.model = hf_model
+            print(f"✅ LoRA configuration is successful!")
+            total_params = sum(p.numel() for p in self.agent.model.model.parameters())
+            trainable_params = sum(p.numel() for p in self.agent.model.model.parameters() if p.requires_grad)
+            percentage = 100 * trainable_params / total_params if total_params > 0 else 0
+
+            print(f"Trainable parameters: {trainable_params:,} / {total_params:,} "
+                  f"({percentage:.2f}%)")

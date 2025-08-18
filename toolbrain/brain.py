@@ -11,6 +11,7 @@ from .adapters import BaseAgentAdapter, SmolAgentAdapter
 from .rl.grpo import GRPOAlgorithm, Policy 
 from smolagents import CodeAgent
 
+
 class Brain:
     """
     The flexible and intelligent trainer for ToolBrain agents.
@@ -23,14 +24,13 @@ class Brain:
         self,
         agent: Any, # Any agent instance
         reward_func: RewardFunction,
-        brain_config: Dict[str, Any],
-        rl_config: Dict[str, Any],
+        config: Dict[str, Any],
         learning_algorithm: str = "GRPO",
     ):
         """
         Initializes the Brain by automatically selecting the correct adapter for the agent.
         """
-        self.config = brain_config
+        self.config = config
         self.reward_func = reward_func
         self.learning_algorithm = learning_algorithm
         
@@ -52,7 +52,7 @@ class Brain:
             policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
             self.rl_module = GRPOAlgorithm(
                 initial_policy=policy, 
-                config=rl_config
+                config=config
             )
         else:
             raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
@@ -65,7 +65,7 @@ class Brain:
         Factory method to automatically select the appropriate adapter for the given agent.
         """
         if isinstance(agent_instance, CodeAgent):
-            return SmolAgentAdapter(agent=agent_instance)
+            return SmolAgentAdapter(agent=agent_instance, config=self.config)
         # Future example:
         # elif isinstance(agent_instance, AutoGenAgent):
         #     return AutoGenAdapter(agent=agent_instance)
