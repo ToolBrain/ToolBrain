@@ -6,4 +6,3 @@ dotenv
 numpy<2.0
 accelerate
 hf_xet
-RestrictedPython

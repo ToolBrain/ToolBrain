@@ -63,35 +63,24 @@ def main():
     print("🤖 User is creating their own agent...")
    
     print("📥 Initializing TransformersModel...")
-    trainable_model = TransformersModel(model_id="HuggingFaceTB/SmolLM-135M-Instruct")
+    trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct")
     print("✅ TransformersModel initialized.")
     
+    # Get the tokenizer from inside the model
+    tokenizer = trainable_model.tokenizer
+    
+    # If the tokenizer does not yet have a chat template, set a default one
+    if tokenizer.chat_template is None:
+        print("🔧 Setting a default chat template for the tokenizer.")
+        # This is a very common and safe template
+        tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '<|user|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'system' %}{{ '<|system|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\n'  + message['content'] + '<|end|>\n' }}{% endif %}{% endfor %}"
+
     print("🔧 Creating CodeAgent...")
     my_agent = CodeAgent(
         tools=[add, multiply],
         model=trainable_model
     )
     print("✅ Agent created.")
-
-    print("🔄 Testing model loading with a simple generation...")
-    try:
-        test_content = [{"type": "text", "text": "Hello"}]
-        test_messages = [ChatMessage(role=MessageRole.USER, content=test_content)]
-        
-        
-        test_response_object = trainable_model.generate(
-            messages=test_messages,
-            max_new_tokens=10
-        )
-        
-        
-        test_response_string = test_response_object.content if hasattr(test_response_object, 'content') else str(test_response_object)
-
-        print(f"✅ Model loaded successfully! Test response: {test_response_string[:50]}...")
-    except Exception as e:
-        print(f"⚠️ Model loading test failed: {e}")
-        import traceback
-        traceback.print_exc()
 
     # --- 4. Initialize Brain and Train ---
     # User only needs to pass their agent to Brain

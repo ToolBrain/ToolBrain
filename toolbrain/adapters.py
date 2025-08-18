@@ -6,17 +6,13 @@ agent libraries compatible with ToolBrain's trace-based training system.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from typing import Optional, List, Any
 from smolagents import CodeAgent, TransformersModel, ChatMessage, MessageRole
 import io
 import contextlib
 import re
 
 from .core_types import Trace, Turn, ParsedCompletion
-
-from RestrictedPython import compile_restricted, safe_globals
-from RestrictedPython.PrintCollector import PrintCollector
-from RestrictedPython.Guards import safer_getattr, full_write_guard
 
 class BaseAgentAdapter(ABC):
     """Abstract base class for agent adapters."""
@@ -56,191 +52,115 @@ class SmolAgentAdapter(BaseAgentAdapter):
         return self.agent.model
 
     def run(self, query: str) -> Trace:
-        print(f"🚀 Starting agent execution for query: '{query[:50]}...'")
-        full_trace: Trace = []
-        history: Trace = []
-
-        for turn_number in range(self.max_turns):
-            print(f"  📝 Turn {turn_number+1}/{self.max_turns}")
-            prompt_for_this_turn = self._build_prompt_for_turn(query, history)
-            print(f"    📤 Sending prompt to model ({len(prompt_for_this_turn)} chars)...")
-            
-            model_completion_string = self._get_llm_completion(prompt_for_this_turn)
-            
-            print(f"    📥 Model response received ({len(model_completion_string)} chars)")
-            print(f"    DEBUG [Turn {turn_number+1}] LLM Raw Output:\n---\n{model_completion_string}\n---")
-
-            parsed_completion = self._parse_model_completion(model_completion_string)
-            
-            tool_output_string = None
-            if parsed_completion.get("tool_code"):
-                tool_output_string = self._execute_tool_code(parsed_completion["tool_code"])
-            
-            current_turn: Turn = {
-                "prompt_for_model": prompt_for_this_turn,
-                "model_completion": model_completion_string,
-                "parsed_completion": parsed_completion,
-                "tool_output": tool_output_string
-            }
-            full_trace.append(current_turn)
-            history.append(current_turn)
-            
-            if parsed_completion.get("final_answer"):
-                print(f"    🎯 Final answer found: {parsed_completion['final_answer'][:100]}...")
-                break
-            
-            if not parsed_completion.get("tool_code"):
-                print(f"⚠️ Agent did not produce a tool call in turn {turn_number + 1}. Ending trace.")
-                break
+        """
+        Executes the agent and then extracts a structured, high-fidelity trace
+        from the agent's memory.
+        """
+        print(f"🚀 Adapter is calling agent.run() for query: '{query[:50]}...'")
         
-        print(f"✅ Agent execution completed in {len(full_trace)} turns")
+        try:
+            self.agent.run(query, reset=True)
+            
+            structured_trace = self._extract_trace_from_memory()
+            
+            print(f"✅ Agent run completed. Extracted a trace with {len(structured_trace)} turns.")
+            return structured_trace
+
+        except Exception as e:
+            print(f"❌ Error during agent.run() or trace extraction: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            error_turn: Turn = {
+                "prompt_for_model": query,
+                "model_completion": f"Adapter/Agent Runtime Error: {str(e)}",
+                "parsed_completion": {"thought": None, "tool_code": None, "final_answer": f"Adapter/Agent Runtime Error: {str(e)}"},
+                "tool_output": None
+            }
+            return [error_turn]
+
+    def _extract_trace_from_memory(self) -> Trace:
+        """
+        Parses the agent's internal memory into our standardized Trace format.
+        This version leverages pre-parsed fields from ActionStep where possible
+        and parses the rest from the raw model_output.
+        """
+        if not hasattr(self.agent, 'memory') or not hasattr(self.agent.memory, 'steps'):
+            return []
+
+        full_trace: Trace = []
+        
+        for step in self.agent.memory.steps:
+            if step.__class__.__name__ == 'ActionStep':
+                
+                prompt_for_model_str = self._format_messages_to_string(step.model_input_messages)
+                model_completion_str = step.model_output or ""
+                tool_output_str = step.observations or ""
+                if step.error:
+                    tool_output_str += f"\nError: {str(step.error)}"
+
+                parsed_completion: ParsedCompletion = {
+                    "thought": None,
+                    "tool_code": step.code_action,
+                    "final_answer": None
+                }
+
+                missing_parts = self._parse_missing_parts(model_completion_str)
+                
+                parsed_completion["thought"] = missing_parts.get("thought")
+                if not parsed_completion["final_answer"]:
+                    parsed_completion["final_answer"] = missing_parts.get("final_answer")
+
+                current_turn: Turn = {
+                    "prompt_for_model": prompt_for_model_str.strip(),
+                    "model_completion": model_completion_str.strip(),
+                    "parsed_completion": parsed_completion,
+                    "tool_output": tool_output_str.strip() if tool_output_str else None
+                }
+                full_trace.append(current_turn)
+                
         return full_trace
 
-    def _build_prompt_for_turn(self, query: str, history: Trace) -> str:
-        tool_definitions_str = self._get_tool_definitions()
-        
-        if not history:
-            initial_prompt = f"""SYSTEM:
-You are a precise and logical AI assistant. Your task is to solve the user's query by thinking step-by-step and using the provided tools. You MUST strictly follow the specified format. Do not add any extra explanations or introductory phrases.
-
-AVAILABLE TOOLS:
-{tool_definitions_str}
-
-RESPONSE FORMAT:
-You must respond with a sequence of Thought and Action blocks. An action can be `Code` or `Final Answer`.
-
-1.  **Thought**: Reason about the user's query and decide the next action.
-2.  **Code**: Write the Python code to call ONE of the available tools to make progress.
-3.  **Final Answer**: Provide the final answer ONLY when the task is fully completed.
-
----
-EXAMPLE:
-USER QUERY: What is 8 multiplied by 6?
-
-ASSISTANT RESPONSE:
-Thought: The user wants to multiply 8 and 6. I have the `multiply` tool available for this. I will call this tool with the numbers 8 and 6 and print the result to the output.
-Code:
-print(multiply(8, 6))
-
----
-TASK:
-USER QUERY: {query}
-"""
-            return initial_prompt + "\nASSISTANT RESPONSE:\nThought:"
-
-        else:
-            initial_prompt = f"""SYSTEM:
-You are a helpful AI assistant... (instructions)
-
-USER QUERY: {query}
-"""
-            history_str = self._format_history_for_prompt(history)
-            
-            return initial_prompt + history_str + "\nASSISTANT RESPONSE:\nThought:"
-
-    def _get_tool_definitions(self) -> str:
-        tool_definitions = []
-        if hasattr(self.agent, 'tools') and isinstance(self.agent.tools, dict):
-            for tool_name, tool_func in self.agent.tools.items():
-                docstring = getattr(tool_func, '__doc__', None) or "No description available."
-                tool_definitions.append(f"- {tool_name}: {docstring.strip()}")
-        return "\n".join(tool_definitions)
-
-    def _format_history_for_prompt(self, history: Trace) -> str:
+    def _parse_missing_parts(self, model_output: str) -> dict:
         """
-        Formats the history of Turns into a single string for the prompt.
+        A helper to parse only thought and final_answer from the raw model output.
         """
-        parts = []
-        for turn in history:
-            parts.append(f"\nASSISTANT RESPONSE:\n{turn['model_completion']}")
-            
-            if turn["tool_output"]:
-                parts.append(f"\nTOOL OUTPUT:\n{turn['tool_output']}")
+        if not isinstance(model_output, str): return {}
         
-        return "".join(parts)
-
-    def _get_llm_completion(self, prompt: str) -> str:
-        try:
-            print(f"      🤖 Calling model.generate()...")
-            import time
-            start_time = time.time()
-            
-            content_to_send = [{"type": "text", "text": prompt}]
-            messages_to_send = [
-                ChatMessage(role=MessageRole.USER, content=content_to_send)
-            ]
-            
-            response_object = self.agent.model.generate(
-                messages=messages_to_send,
-                stop_sequences=["Tool Output:", "Observation:"]
-            )
-            
-            generation_time = time.time() - start_time
-            print(f"      ⚡ Model generation completed in {generation_time:.2f}s")
-            
-            if hasattr(response_object, 'content') and isinstance(response_object.content, str):
-                return response_object.content
-            else:
-                print(f"      ⚠️ WARNING: Model response is not a ChatMessage with .content. Casting to string.")
-                return str(response_object)
-
-        except Exception as e:
-            print(f"❌ ERROR: Local model generation failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return f"Error: LLM call failed. Details: {str(e)}"
-
-    def _parse_model_completion(self, model_output: str) -> ParsedCompletion:
-        if not isinstance(model_output, str):
-            model_output = str(model_output or "")
-        parsed: ParsedCompletion = {"thought": None, "tool_code": None, "final_answer": None}
-        thought_match = re.search(r"Thought:(.*?)(?:Code:|Final Answer:|$)", model_output, re.DOTALL)
+        parts = {}
+        thought_match = re.search(r"Thought:(.*?)(?:Code:|$)", model_output, re.DOTALL | re.IGNORECASE)
         if thought_match and thought_match.group(1):
-            parsed["thought"] = thought_match.group(1).strip()
-        code_match = re.search(r"Code:(.*?)(?:Thought:|Final Answer:|$)", model_output, re.DOTALL)
-        if code_match and code_match.group(1):
-            code_content = code_match.group(1).strip().replace("`", "")
-            if code_content.startswith("python"):
-                code_content = code_content[6:].strip()
-            parsed["tool_code"] = code_content
-        answer_match = re.search(r"Final Answer:(.*)", model_output, re.DOTALL)
+            parts["thought"] = thought_match.group(1).strip()
+
+        answer_match = re.search(r"Final Answer:(.*)", model_output, re.DOTALL | re.IGNORECASE)
         if answer_match and answer_match.group(1):
-            parsed["final_answer"] = answer_match.group(1).strip()
-        if not any(parsed.values()):
-            parsed["thought"] = model_output.strip()
-        return parsed
-
-    def _execute_tool_code(self, tool_code: str) -> Optional[str]:
-        """
-        Executes tool code in a highly secure and robust sandbox using RestrictedPython,
-        incorporating advanced guards and result handling.
-        """
-        print(f"  🔧 Executing tool code: '{tool_code}'")
-
-        execution_scope = safe_globals.copy()
-        execution_scope.update(self.agent.tools)
-
-        execution_scope['_getattr_'] = safer_getattr
-        execution_scope['_write_'] = full_write_guard 
-        
-        collector = PrintCollector()
-        execution_scope['_print_'] = collector
-
-        try:
-            byte_code = compile_restricted(
-                tool_code,
-                filename='<agent_code>',
-                mode='exec'
-            )
+            parts["final_answer"] = answer_match.group(1).strip()
             
-            exec(byte_code, execution_scope)
+        return parts
 
-            result = collector.getvalue().strip() 
-            return result if result else "Code executed without output."
-
-        except Exception as e:
-            import traceback
-            print("--- EXECUTION ERROR ---")
-            traceback.print_exc()
-            print("-----------------------")
-            return f"Error executing tool code: {str(e)}"
+    def _format_messages_to_string(self, messages: List[ChatMessage]) -> str:
+        """
+        Converts a list of smolagents.ChatMessage objects into a single,
+        human-readable string, based on the actual class structure.
+        This is used to reconstruct the `prompt_for_model` for our Trace.
+        """
+        if not messages:
+            return ""
+        
+        full_text_parts = []
+        for msg in messages:
+            role = msg.role.name.upper() if hasattr(msg, 'role') and hasattr(msg.role, 'name') else 'UNKNOWN_ROLE'
+            
+            content_text = ""
+            if isinstance(msg.content, list):
+                text_parts = []
+                for item in msg.content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                content_text = " ".join(text_parts)
+            elif isinstance(msg.content, str):
+                content_text = msg.content
+            
+            full_text_parts.append(f"--- {role} ---\n{content_text}")
+            
+        return "\n".join(full_text_parts)
