@@ -215,19 +215,27 @@ class SmolAgentAdapter(BaseAgentAdapter):
 
     def _parse_missing_parts(self, model_output: str) -> dict:
         """
-        A helper to parse only thought and final_answer from the raw model output.
+        A helper to parse thought and a cleaned final_answer from the raw model output.
         """
         if not isinstance(model_output, str): return {}
         
         parts = {}
-        thought_match = re.search(r"Thought:(.*?)(?:Code:|$)", model_output, re.DOTALL | re.IGNORECASE)
+        
+        thought_match = re.search(r"Thought:(.*?)(?:Code:|Final Answer:|$)", model_output, re.DOTALL | re.IGNORECASE)
         if thought_match and thought_match.group(1):
             parts["thought"] = thought_match.group(1).strip()
 
         answer_match = re.search(r"Final Answer:(.*)", model_output, re.DOTALL | re.IGNORECASE)
         if answer_match and answer_match.group(1):
-            parts["final_answer"] = answer_match.group(1).strip()
+            raw_answer_text = answer_match.group(1).strip()
             
+            number_match = re.search(r'[-+]?\d*\.\d+|\d+', raw_answer_text)
+            
+            if number_match:
+                parts["final_answer"] = number_match.group(0)
+            else:
+                parts["final_answer"] = raw_answer_text
+                
         return parts
 
     def _format_messages_to_string(self, messages: List[ChatMessage]) -> str:
