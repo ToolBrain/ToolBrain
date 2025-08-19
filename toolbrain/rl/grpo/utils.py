@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from transformers import AutoModelForCausalLM
 
-from ...core_types import Trace, Turn, ParsedCompletion
+from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
 
 
 @dataclass(frozen=True)
@@ -68,8 +68,9 @@ def compute_advantages(rewards: torch.Tensor | List[float]) -> torch.Tensor:
     normalized_r = (rewards - mean) / (std + 1e-8)
     return normalized_r
 
+
 def build_inputs(
-    traces: List[Trace],
+    segments: List[List[ChatSegment]],
     tokenizer: PreTrainedTokenizerBase,
     rewards: List[float],
 ) -> GRPOBatch:
@@ -77,11 +78,11 @@ def build_inputs(
     Prepare a batch for GRPO from a batch of traces.
 
     Args:
-        traces: Batch of traces. Each trace is a list of `Turn` dicts. A `Turn` contains:
-            - prompt_for_model: The exact context the LLM saw
-            - model_completion: The exact raw string the LLM generated
-            - parsed_completion: Structured breakdown of the completion
-            - tool_output (optional): Result from executing the tool code
+        segments: Batch of chat segments. Each chat segment is a list of `ChatSegment` dicts. A `ChatSegment` contains:
+            - role: role of tje segment, either assistant or other
+            - start: start position of the  text of the chat segment in the chat history
+            - end: end position of the  text of the chat segment in the chat history
+            - text: text of the chat segment in the chat history
         tokenizer: A HuggingFace tokenizer (already loaded). `pad_token` should be set.
         rewards: A list of reward-per-trace (final reward). The same scalar is expanded along the time dimension of that trace.
 
@@ -100,56 +101,25 @@ def build_inputs(
     # Normalize per-trace rewards across the batch (DeepSeekMath §4.1.2)
     normalized_rewards = compute_advantages(rewards)  # shape: (B,)
     
-    for idx, trace in enumerate(traces):
+    for idx, trace in enumerate(segments):
         seq_ids: List[int] = []
         seq_attn: List[int] = []
         seq_comp_mask: List[int] = []
         seq_advs: List[float] = []
 
-        for i, turn in enumerate(trace):
-            # Coerce possible non-string fields (None/dict/list/number) to string
-            prompt = _to_text(turn.get("prompt_for_model", ""))
-            model_text = _to_text(turn.get("model_completion", ""))
-            tool_text = _to_text(turn.get("tool_output", ""))
-
-            # Tokenize all three segments for this turn
-            prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
-            model_ids = tokenizer.encode(model_text, add_special_tokens=False)
-            tool_ids = tokenizer.encode(tool_text, add_special_tokens=False)
-
-            # Append in the order actually seen by the model/logging
-            # For n turn, we need: P1 C1 O1 C2 O2 ... Cn On
-            # (where P is prompt, C is model_completion, O is tool_output)
-            if i == 0:
-                # For the first turn, we include the prompt_for_model
-                turn_ids = prompt_ids + model_ids + tool_ids
+        for i, segment in enumerate(trace):
+            segment_ids = tokenizer.encode(segment["text"], add_special_tokens=False)
+            seq_ids.extend(segment_ids)
+            # Attention mask: 1 for every real token
+            seq_attn.extend([1] * len(segment_ids))
+            # Completion mask: 1 only for model_completion tokens
+            if segment["role"] != "assistant":
+                seq_comp_mask.extend([0] * len(segment_ids))
             else:
-                # For subsequent turns, we only use the model completion to avoid duplicating the prompt
-                turn_ids = model_ids + tool_ids
+                seq_comp_mask.extend([1] * len(segment_ids))
 
-            # Make sure pad_sequence will not crash if input_ids is empty
-            if len(turn_ids) == 0:
-                turn_ids = tokenizer.encode(tokenizer.eos_token, add_special_tokens=False)
-                seq_ids.extend(turn_ids)
-                seq_attn.extend([1] * len(turn_ids))
-                seq_comp_mask.extend([0] * len(turn_ids))
-                seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
-            else:
-                seq_ids.extend(turn_ids)
-
-                # Attention mask: 1 for every real token
-                seq_attn.extend([1] * len(turn_ids))
-
-                # Completion mask: 1 only for model_completion tokens
-                if i == 0:
-                    # For the first turn, model_completion is the second segment
-                    seq_comp_mask.extend([0] * len(prompt_ids) + [1] * len(model_ids) + [0] * len(tool_ids))
-                else:
-                    # For subsequent turns, model_completion is the first segment
-                    seq_comp_mask.extend([1] * len(model_ids) + [0] * len(tool_ids))
-
-                # Expand the per-trace normalized reward along this turn's tokens
-                seq_advs.extend([float(normalized_rewards[idx].item())] * len(turn_ids))
+            # Expand the per-trace normalized reward along this turn's tokens
+            seq_advs.extend([float(normalized_rewards[idx].item())] * len(segment_ids))
 
         # Accumulate per-trace sequences
         all_input_ids.append(seq_ids)
@@ -185,6 +155,7 @@ def build_inputs(
         completion_mask=completion_mask,
         advantages=advantages
     )
+
 
 def compute_per_token_logps(
     logits: torch.Tensor,          # (B, L-1, V)

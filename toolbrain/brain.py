@@ -101,15 +101,17 @@ class Brain:
         
         traces: List[Trace] = []
         rewards: List[float] = []
-        
+        rl_inputs: List[Any] = []
+
         print(f"  📊 Collecting {num_group_members} traces...")
         for i in range(num_group_members):
             try:
                 print(f"    📝 Trace {i+1}/{num_group_members}")
-                trace = self.agent_adapter.run(query)
+                trace, rl_input = self.agent_adapter.run(query)
                 reward = float(self.reward_func(trace=trace, **reward_kwargs))
                 traces.append(trace)
                 rewards.append(reward)
+                rl_inputs.append(rl_input)
                 print(f"      🎯 Reward: {reward:.3f}")
             except Exception as e:
                 print(f"    ❌ Error during agent iteration: {e}")
@@ -120,7 +122,7 @@ class Brain:
             return
         
         print(f"  🧠 Running RL training step with {len(traces)} traces...")
-        self.rl_module.train_step(traces, rewards)
+        self.rl_module.train_step(rl_inputs, rewards)
         print(f"  ✅ RL training step completed")
 
     def get_agent(self) -> Any:

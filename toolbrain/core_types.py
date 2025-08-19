@@ -39,6 +39,7 @@ class Turn(TypedDict):
     model_completion: str  # The exact raw string the LLM generated
     parsed_completion: ParsedCompletion  # Structured breakdown of the completion
     tool_output: Optional[str]  # Result from executing the tool code (if any)
+    action_output: Optional[str]  # Result from executing the tool code (if any)
 
 
 # New trace structure: List of Turns for data consistency
@@ -61,4 +62,11 @@ class RewardFunction(Protocol):
     - turn.parsed_completion: Structured breakdown
     - turn.tool_output: Environment feedback
     """
-    def __call__(self, trace: Trace, **kwargs: Any) -> float: ... 
+    def __call__(self, trace: Trace, **kwargs: Any) -> float: ...
+
+
+class ChatSegment(TypedDict):
+    role: str
+    start: int
+    end: int
+    text: str
