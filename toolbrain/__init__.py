@@ -11,6 +11,7 @@ The framework uses the Adapter pattern for clean separation of concerns.
 from .brain import Brain
 from .core_types import Trace, TraceStep
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
+from .example_gen import generate_training_examples
 
 __version__ = "0.1.0"
 __all__ = [
