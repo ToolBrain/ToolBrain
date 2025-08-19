@@ -6,6 +6,7 @@ agent libraries compatible with ToolBrain's trace-based training system.
 """
 
 from abc import ABC, abstractmethod
+from smolagents.models import get_clean_message_list, tool_role_conversions
 from typing import Optional, List, Any
 
 from peft import get_peft_model
@@ -14,7 +15,7 @@ import io
 import contextlib
 import re
 
-from .core_types import Trace, Turn, ParsedCompletion
+from .core_types import Trace, Turn, ParsedCompletion, ChatSegment
 
 
 class BaseAgentAdapter(ABC):
@@ -66,10 +67,11 @@ class SmolAgentAdapter(BaseAgentAdapter):
         try:
             self.agent.run(query, reset=True)
             
-            structured_trace = self._extract_trace_from_memory()
-            
+            structured_trace= self._extract_trace_from_memory()
+            rl_input = self._build_input_for_rl_from_memory()
+
             print(f"✅ Agent run completed. Extracted a trace with {len(structured_trace)} turns.")
-            return structured_trace
+            return structured_trace, rl_input
 
         except Exception as e:
             print(f"❌ Error during agent.run() or trace extraction: {e}")
@@ -82,7 +84,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 "parsed_completion": {"thought": None, "tool_code": None, "final_answer": f"Adapter/Agent Runtime Error: {str(e)}"},
                 "tool_output": None
             }
-            return [error_turn]
+            return [error_turn], None
 
     def _extract_trace_from_memory(self) -> Trace:
         """
@@ -98,9 +100,9 @@ class SmolAgentAdapter(BaseAgentAdapter):
         for step in self.agent.memory.steps:
             if step.__class__.__name__ == 'ActionStep':
                 
-                prompt_for_model_str = self._format_messages_to_string(step.model_input_messages)
                 model_completion_str = step.model_output or ""
                 tool_output_str = step.observations or ""
+                action_output_str = step.action_output or ""
                 if step.error:
                     tool_output_str += f"\nError: {str(step.error)}"
 
@@ -115,16 +117,101 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 parsed_completion["thought"] = missing_parts.get("thought")
                 if not parsed_completion["final_answer"]:
                     parsed_completion["final_answer"] = missing_parts.get("final_answer")
-
+                if step.model_input_messages is not None:
+                    prompt_for_model_str = self.agent.model.tokenizer.apply_chat_template(
+                        [{"content": m.content, "role": str(m.role)} for m in step.model_input_messages],
+                        return_tensors="pt",
+                        add_generation_prompt=True,
+                        tokenize=False,
+                    )
+                else:
+                    prompt_for_model_str = ""
                 current_turn: Turn = {
                     "prompt_for_model": prompt_for_model_str.strip(),
                     "model_completion": model_completion_str.strip(),
                     "parsed_completion": parsed_completion,
-                    "tool_output": tool_output_str.strip() if tool_output_str else None
+                    "tool_output": tool_output_str.strip() if tool_output_str else None,
+                    "action_output": action_output_str
                 }
                 full_trace.append(current_turn)
                 
         return full_trace
+
+    def _build_input_for_rl_from_memory(self) -> Any:
+        """
+        Parses the agent's internal memory, build input for RL learning
+        """
+        messages = self.agent.write_memory_to_messages()
+        messages = get_clean_message_list(messages, role_conversions=tool_role_conversions, flatten_messages_as_text=True)
+        out = self.agent.model.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=False
+        )
+        segments = self._segment_text_with_assistant(out, messages)
+        return segments
+
+    def _segment_text_with_assistant(self, full_text: str, messages: list) -> list[dict]:
+        """
+        Split full_text into contiguous segments, labeling only assistant messages.
+        Ensures the sum of all segments equals the original text.
+
+        Args:
+            full_text: str, rendered chat text
+            messages: list of {'role': str, 'content': str}
+
+        Returns:
+            List of segments [{'role': 'assistant' or 'other', 'start': int, 'end': int, 'text': str}]
+        """
+        segments = []
+        pos = 0  # cursor in full_text
+
+        for msg in messages:
+            if msg["role"] != "assistant":
+                continue  # skip non-assistant messages
+
+            snippet = msg["content"]
+            start = full_text.find(snippet, pos)
+            if start == -1:
+                continue  # skip if not found
+            end = start + len(snippet)
+
+            # text before this assistant message is "other"
+            if start > pos:
+                segment: ChatSegment = {
+                    "role": "other",
+                    "start": pos,
+                    "end": start,
+                    "text": full_text[pos:start]
+                }
+                segments.append(segment)
+
+            # assistant message
+            segment: ChatSegment = {
+                "role": "assistant",
+                "start": start,
+                "end": end,
+                "text": full_text[start:end]
+            }
+            segments.append(segment)
+
+            pos = end  # move cursor forward
+
+        # any remaining text after last assistant message
+        if pos < len(full_text):
+            segment: ChatSegment = {
+                "role": "other",
+                "start": pos,
+                "end": len(full_text),
+                "text": full_text[pos:]
+            }
+            segments.append(segment)
+
+        # --- Assertion: the sum of all segment texts equals the original text ---
+        combined_text = "".join(seg["text"] for seg in segments)
+        assert combined_text == full_text, "Segments do not cover the full text!"
+
+        return segments
 
     def _parse_missing_parts(self, model_output: str) -> dict:
         """

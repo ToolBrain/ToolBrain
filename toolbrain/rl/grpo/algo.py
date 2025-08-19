@@ -7,7 +7,8 @@ from torch.nn.utils import clip_grad_norm_
 
 from .utils import Policy, build_inputs
 from .losses import grpo_loss
-from ...core_types import Trace, Turn, ParsedCompletion
+from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
+
 
 def validate_config(config: dict) -> None:
     """
@@ -73,7 +74,7 @@ class GRPOAlgorithm:
 
     def train_step(
         self,
-        traces: List[Trace],
+        segments: List[List[ChatSegment]],
         rewards: List[float],
     ) -> None:
         """Run one GRPO update over a batch of traces.
@@ -84,10 +85,10 @@ class GRPOAlgorithm:
         """
         device = self.device
         pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
-        assert len(traces) == len(rewards), f"Length of traces and rewards must be the same. Received {len(traces)} traces, {len(rewards)} rewards."
+        assert len(segments) == len(rewards), f"Length of traces and rewards must be the same. Received {len(traces)} traces, {len(rewards)} rewards."
 
         batch = build_inputs(
-            traces=traces,
+            segments=segments,
             rewards=rewards,
             tokenizer=pi_theta.tokenizer
         )
