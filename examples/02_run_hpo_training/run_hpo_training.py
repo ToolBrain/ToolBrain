@@ -18,7 +18,7 @@ from lightgbm_model import run_lightgbm
 # --- 2. Prepare Training Data ---
 training_dataset = [
     {
-        "query": "Use the run_lightgbm tool with a suggested value of feature_fraction (must be between 0.0 and 1.0)."
+        "query": "Use the run_lightgbm tool with a value of feature_fraction (must be between 0.0 and 1.0)."
     }
 ]
 
@@ -26,7 +26,7 @@ training_dataset = [
 def reward_accuracy(trace: Trace, **kwargs: Any) -> float:
     for turn in trace:
         try:
-            reward = float(turn["action_output"])
+            reward = float(turn["action_output"]["Accuracy"])
             return reward
         except:
             reward = 0.0
@@ -74,7 +74,7 @@ def main():
             "lr": 1e-5,  # Learning rate for optimizer
             "max_grad_norm": 1.0,
             "chunk_len": 128,  # If not None, get_per_token_logps will process in chunks
-            "num_group_members": 2,  # The number of group members used for GRPO training steps
+            "num_group_members": 1,  # The number of group members used for GRPO training steps
             "lora_config": LoraConfig(  # If set, the RL will perform LoRA finetuning instead of full fine-tuning
                 r=8,  # LoRA rank
                 lora_alpha=16,  # scaling
@@ -86,7 +86,7 @@ def main():
         }
     )
 
-    brain.train(training_dataset)
+    brain.train(training_dataset, num_iterations=1)
 
     # Get the trained agent
     trained_agent = brain.get_agent()

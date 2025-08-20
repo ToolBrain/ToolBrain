@@ -5,7 +5,7 @@ import sklearn.metrics
 from smolagents import tool
 
 @tool
-def run_lightgbm(feature_fraction: float) -> float:
+def run_lightgbm(feature_fraction: float) -> dict:
     """
     Train and evaluate a LightGBM binary classifier on the Breast Cancer dataset.
 
@@ -20,6 +20,8 @@ def run_lightgbm(feature_fraction: float) -> float:
     Args:
         feature_fraction (float): Fraction of features to use when training
             each boosting iteration. Must be between 0.0 and 1.0.
+    Return:
+        dict: a dictionary with the accuracy
     """
     data, target = sklearn.datasets.load_breast_cancer(return_X_y=True)
 
@@ -55,5 +57,5 @@ def run_lightgbm(feature_fraction: float) -> float:
     pred_labels = (preds >= 0.5).astype(int)
     accuracy = sklearn.metrics.accuracy_score(valid_y, pred_labels)
     print("Prediction accuracy", accuracy)
-    return  accuracy
+    return  {"Accuracy": accuracy}
 

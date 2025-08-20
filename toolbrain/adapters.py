@@ -142,13 +142,17 @@ class SmolAgentAdapter(BaseAgentAdapter):
         Parses the agent's internal memory, build input for RL learning
         """
         messages = self.agent.write_memory_to_messages()
-        messages = get_clean_message_list(messages, role_conversions=tool_role_conversions, flatten_messages_as_text=True)
-        out = self.agent.model.tokenizer.apply_chat_template(
+        messages = get_clean_message_list(messages, role_conversions=tool_role_conversions,
+                                          flatten_messages_as_text=True)
+        out_text = self.agent.model.tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
             tokenize=False
         )
-        segments = self._segment_text_with_assistant(out, messages)
+        messages = self.agent.write_memory_to_messages()
+        messages = get_clean_message_list(messages,
+                                          flatten_messages_as_text=True)
+        segments = self._segment_text_with_assistant(out_text, messages)
         return segments
 
     def _segment_text_with_assistant(self, full_text: str, messages: list) -> list[dict]:

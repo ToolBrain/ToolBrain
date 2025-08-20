@@ -63,6 +63,8 @@ def compute_advantages(rewards: torch.Tensor | List[float]) -> torch.Tensor:
     """
     if not isinstance(rewards, torch.Tensor):
         rewards = torch.tensor(rewards, dtype=torch.float32)
+    if rewards.numel() == 1:
+        return rewards
     mean = rewards.mean()
     std = rewards.std(unbiased=False)
     normalized_r = (rewards - mean) / (std + 1e-8)
