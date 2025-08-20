@@ -50,10 +50,18 @@ class GRPOAlgorithm:
         self.config = config
 
         self.training_steps = 0
-        self.optimizer = bnb.optim.AdamW8bit(
-            self.policy.llm.parameters(),
-            lr=self.config["lr"],
-        )
+        use_bitandbytes = config.get("use_bitsandbytes", False)
+        if use_bitandbytes:
+            self.optimizer = bnb.optim.AdamW8bit(
+                self.policy.llm.parameters(),
+                lr=self.config["lr"],
+            )
+        else:
+            self.optimizer = torch.optim.AdamW(
+                self.policy.llm.parameters(),
+                lr=self.config["lr"]
+            )
+
 
     def _update_policy(self, pi_theta, loss):
         """Apply one optimizer step using the algorithm's optimizer and gradient clipping."""

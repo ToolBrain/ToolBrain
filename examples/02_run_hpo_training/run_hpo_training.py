@@ -42,14 +42,19 @@ def main():
     print("🤖 User is creating their own agent...")
 
     print("📥 Initializing TransformersModel...")
-    nf4_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-    )
-    trainable_model = TransformersModel(
-        model_id="Qwen/Qwen2.5-0.5B-Instruct",
-        model_kwargs={"quantization_config": nf4_config},
-    )
+
+    use_bitsandbytes = False
+    if use_bitsandbytes:
+        nf4_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        trainable_model = TransformersModel(
+            model_id="Qwen/Qwen2.5-0.5B-Instruct",
+            model_kwargs={"quantization_config": nf4_config},
+        )
+    else:
+        trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct")
     # trainable_model = TransformersModel(model_id="ibm-granite/granite-3.0-2b-instruct")
 
     print("✅ TransformersModel initialized.")
@@ -80,6 +85,7 @@ def main():
             "max_grad_norm": 1.0,
             "chunk_len": 128,  # If not None, get_per_token_logps will process in chunks
             "num_group_members": 2,  # The number of group members used for GRPO training steps
+            "use_bitsandbytes": use_bitsandbytes, # Whether to use bitandbytes for training
             "lora_config": LoraConfig(  # If set, the RL will perform LoRA finetuning instead of full fine-tuning
                 r=8,  # LoRA rank
                 lora_alpha=16,  # scaling
