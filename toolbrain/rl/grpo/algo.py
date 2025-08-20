@@ -151,26 +151,29 @@ if __name__ == "__main__":
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     # Traces
-    traces: List[Trace] = [
+    traces: List[List[ChatSegment]] = [
         [
-            Turn(
-                prompt_for_model="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
-                model_completion="Thought: I'll write a short Python loop.\n```python\ns=sum(range(1,11)); print(s)\n```\n",
-                parsed_completion=ParsedCompletion(thought="thought", code="some code"),
-                tool_output="Execution logs:\n55\nLast output from code snippet:\n55",
+            ChatSegment(
+                role="other",
+                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
             ),
-            Turn(
-                prompt_for_model="Given the tool output above, provide the final answer.",
-                model_completion="Final Answer: 55",
-                parsed_completion=ParsedCompletion(),
-                tool_output="",
-            ),
+            ChatSegment(
+                role="assistant",
+                text="I calculate it myself! Final Answer: 55"
+            )
         ],
         [
-            Turn(
-                prompt_for_model="You are a math helper. Sum 1..10.",
-                model_completion="I can compute it mentally: 55.",
-                parsed_completion=ParsedCompletion(),
+            ChatSegment(
+                role="other",
+                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
+            ),
+            ChatSegment(
+                role="assistant",
+                text="<code> sum(list(range(1,11)))</code>",
+            ),
+            ChatSegment(
+                role="other",
+                text="Final Answer: 55"
             )
         ],
     ]
@@ -201,4 +204,4 @@ if __name__ == "__main__":
         config=config
     )
 
-    algo.train_step(traces=traces, rewards=rewards)
+    algo.train_step(segments=traces, rewards=rewards)

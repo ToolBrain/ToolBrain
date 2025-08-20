@@ -82,7 +82,8 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 "prompt_for_model": query,
                 "model_completion": f"Adapter/Agent Runtime Error: {str(e)}",
                 "parsed_completion": {"thought": None, "tool_code": None, "final_answer": f"Adapter/Agent Runtime Error: {str(e)}"},
-                "tool_output": None
+                "tool_output": None,
+                "action_output": None
             }
             return [error_turn], None
 
@@ -184,8 +185,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
             if start > pos:
                 segment: ChatSegment = {
                     "role": "other",
-                    "start": pos,
-                    "end": start,
                     "text": full_text[pos:start]
                 }
                 segments.append(segment)
@@ -193,8 +192,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
             # assistant message
             segment: ChatSegment = {
                 "role": "assistant",
-                "start": start,
-                "end": end,
                 "text": full_text[start:end]
             }
             segments.append(segment)
@@ -205,8 +202,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
         if pos < len(full_text):
             segment: ChatSegment = {
                 "role": "other",
-                "start": pos,
-                "end": len(full_text),
                 "text": full_text[pos:]
             }
             segments.append(segment)

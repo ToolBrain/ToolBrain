@@ -67,6 +67,4 @@ class RewardFunction(Protocol):
 
 class ChatSegment(TypedDict):
     role: str
-    start: int
-    end: int
     text: str
