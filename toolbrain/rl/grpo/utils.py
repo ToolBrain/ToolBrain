@@ -82,8 +82,6 @@ def build_inputs(
     Args:
         segments: Batch of chat segments. Each chat segment is a list of `ChatSegment` dicts. A `ChatSegment` contains:
             - role: role of tje segment, either assistant or other
-            - start: start position of the  text of the chat segment in the chat history
-            - end: end position of the  text of the chat segment in the chat history
             - text: text of the chat segment in the chat history
         tokenizer: A HuggingFace tokenizer (already loaded). `pad_token` should be set.
         rewards: A list of reward-per-trace (final reward). The same scalar is expanded along the time dimension of that trace.

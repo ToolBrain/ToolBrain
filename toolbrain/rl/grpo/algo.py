@@ -64,12 +64,13 @@ class GRPOAlgorithm:
         model = getattr(pi_theta, "llm", None) or getattr(pi_theta, "model", None)
         if model is None:
             raise AttributeError("No model found in pi_theta")
-        
+
         model.train()
         self.optimizer.zero_grad()
         loss.backward()
         clip_grad_norm_(model.parameters(), self.config["max_grad_norm"])
         self.optimizer.step()
+        print("Loss at step", self.training_steps, loss.item())
         return pi_theta
 
     def train_step(
@@ -136,6 +137,8 @@ class GRPOAlgorithm:
 
             # Cache current log-probs as next step's old-policy (detach from graph)
             pi_theta_old_logps = pi_theta_logps.detach()
+            del pi_theta_logps, loss
+            torch.cuda.empty_cache()
 
         self.policy = pi_theta
         self.training_steps += 1
