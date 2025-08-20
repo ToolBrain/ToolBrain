@@ -8,6 +8,7 @@ from torch.nn.utils import clip_grad_norm_
 from .utils import Policy, build_inputs
 from .losses import grpo_loss
 from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
+import bitsandbytes as bnb
 
 
 def validate_config(config: dict) -> None:
@@ -16,18 +17,12 @@ def validate_config(config: dict) -> None:
     Raises:
         ValueError: If any required keys are missing.
     """
-    required_keys = {
-        "epsilon",
-        "beta",
-        "opt_steps",
-        "lr",
-        "max_grad_norm",
-        "chunk_len"
-    }
-    
+    required_keys = {"epsilon", "beta", "opt_steps", "lr", "max_grad_norm", "chunk_len"}
+
     for key in required_keys:
         if key not in config.keys():
             raise ValueError(f"Invalid config: missing '{key}'")
+
 
 class GRPOAlgorithm:
     """Lightweight trainer that wraps GRPO optimization around a Policy.
@@ -36,6 +31,7 @@ class GRPOAlgorithm:
         algo = GRPOAlgorithm(policy)
         algo.train_step(traces, rewards)
     """
+
     def __init__(
         self,
         initial_policy: Policy,
@@ -53,10 +49,10 @@ class GRPOAlgorithm:
         validate_config(config)
         self.config = config
 
-        self.training_steps = 0        
-        self.optimizer = torch.optim.AdamW(
+        self.training_steps = 0
+        self.optimizer = bnb.optim.AdamW8bit(
             self.policy.llm.parameters(),
-            lr=self.config["lr"]
+            lr=self.config["lr"],
         )
 
     def _update_policy(self, pi_theta, loss):
@@ -85,19 +81,21 @@ class GRPOAlgorithm:
             rewards: list of scalar rewards, one per trace.
         """
         device = self.device
-        pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
-        assert len(segments) == len(rewards), f"Length of traces and rewards must be the same. Received {len(traces)} traces, {len(rewards)} rewards."
+        pi_theta = (
+            self.policy
+        )  # train the main policy in-place to keep optimizer params in sync
+        assert len(segments) == len(
+            rewards
+        ), f"Length of traces and rewards must be the same. Received {len(traces)} traces, {len(rewards)} rewards."
 
         batch = build_inputs(
-            segments=segments,
-            rewards=rewards,
-            tokenizer=pi_theta.tokenizer
+            segments=segments, rewards=rewards, tokenizer=pi_theta.tokenizer
         )
- 
-        input_ids = batch.input_ids.to(device) # shape: (B, L)
-        attention_mask = batch.attention_mask.to(device) # shape: (B, L)
-        completion_mask = batch.completion_mask.to(device) # shape: (B, L)
-        advantages = batch.advantages.to(device) # shape: (B, L)
+
+        input_ids = batch.input_ids.to(device)  # shape: (B, L)
+        attention_mask = batch.attention_mask.to(device)  # shape: (B, L)
+        completion_mask = batch.completion_mask.to(device)  # shape: (B, L)
+        advantages = batch.advantages.to(device)  # shape: (B, L)
 
         # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
         #   - pi_theta_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
@@ -105,29 +103,31 @@ class GRPOAlgorithm:
         chunk_len = self.config["chunk_len"]
         with torch.no_grad():
             pi_theta_old_logps = pi_theta.get_per_token_logps(
-                input_ids=input_ids,                  # shape: (B, L)
-                attention_mask=attention_mask,        # shape: (B, L)
-                chunk_len=chunk_len
-            )                                         # shape: (B, L-1)
+                input_ids=input_ids,  # shape: (B, L)
+                attention_mask=attention_mask,  # shape: (B, L)
+                chunk_len=chunk_len,
+            )  # shape: (B, L-1)
             pi_ref_logps = self.pi_ref.get_per_token_logps(
-                input_ids=input_ids,                  # shape: (B, L)
-                attention_mask=attention_mask,        # shape: (B, L)
-                chunk_len=chunk_len
-            )                                         # shape: (B, L-1)
+                input_ids=input_ids,  # shape: (B, L)
+                attention_mask=attention_mask,  # shape: (B, L)
+                chunk_len=chunk_len,
+            )  # shape: (B, L-1)
 
         for _ in range(self.config["opt_steps"]):
             # Current policy log-probs
             # get_per_token_logps drops the first token after logits computation, before per-token logprobs.
-            pi_theta_logps = pi_theta.get_per_token_logps(input_ids, attention_mask, chunk_len=chunk_len) # shape: (B, L-1)
+            pi_theta_logps = pi_theta.get_per_token_logps(
+                input_ids, attention_mask, chunk_len=chunk_len
+            )  # shape: (B, L-1)
 
             # Must shift advantages and completion_mask by 1 token
             # so their shapes match the (B, L-1) log-probs tensors
             loss = grpo_loss(
-                pi_theta_logps=pi_theta_logps,         # shape: (B, L-1)
-                pi_theta_old_logps=pi_theta_old_logps, # shape: (B, L-1)
-                pi_ref_logps=pi_ref_logps,             # shape: (B, L-1)
-                advantages=advantages[:,1:],           # shape: (B, L-1)
-                completion_mask=completion_mask[:,1:], # shape: (B, L-1)
+                pi_theta_logps=pi_theta_logps,  # shape: (B, L-1)
+                pi_theta_old_logps=pi_theta_old_logps,  # shape: (B, L-1)
+                pi_ref_logps=pi_ref_logps,  # shape: (B, L-1)
+                advantages=advantages[:, 1:],  # shape: (B, L-1)
+                completion_mask=completion_mask[:, 1:],  # shape: (B, L-1)
                 epsilon=self.config["epsilon"],
                 beta=self.config["beta"],
             )
@@ -161,9 +161,8 @@ if __name__ == "__main__":
                 text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
             ),
             ChatSegment(
-                role="assistant",
-                text="I calculate it myself! Final Answer: 55"
-            )
+                role="assistant", text="I calculate it myself! Final Answer: 55"
+            ),
         ],
         [
             ChatSegment(
@@ -174,10 +173,7 @@ if __name__ == "__main__":
                 role="assistant",
                 text="<code> sum(list(range(1,11)))</code>",
             ),
-            ChatSegment(
-                role="other",
-                text="Final Answer: 55"
-            )
+            ChatSegment(role="other", text="Final Answer: 55"),
         ],
     ]
 
@@ -194,17 +190,14 @@ if __name__ == "__main__":
 
     # Config
     config = {
-        "epsilon": 0.2, # clipping parameter
-        "beta": 0.04, # KL divergence penalty coefficient
-        "opt_steps": 3, # Number of GRPO optimization steps per batch
-        "lr": 1e-5, # Learning rate for optimizer
-        "max_grad_norm" :1.0, 
-        "chunk_len": 128, # If not None, get_per_token_logps will process in chunks
+        "epsilon": 0.2,  # clipping parameter
+        "beta": 0.04,  # KL divergence penalty coefficient
+        "opt_steps": 3,  # Number of GRPO optimization steps per batch
+        "lr": 1e-5,  # Learning rate for optimizer
+        "max_grad_norm": 1.0,
+        "chunk_len": 128,  # If not None, get_per_token_logps will process in chunks
     }
 
-    algo = GRPOAlgorithm(
-        initial_policy=initial_policy,
-        config=config
-    )
+    algo = GRPOAlgorithm(initial_policy=initial_policy, config=config)
 
     algo.train_step(segments=traces, rewards=rewards)
