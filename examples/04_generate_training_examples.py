@@ -63,7 +63,7 @@ def main() -> None:
         learning_algorithm="GRPO",
         config=get_default_config(),
     )
-    examples = brain.generate_training_examples(
+    examples = brain.generate_train_examples(
         task_description=description,
         num_examples=1,
         external_model=None,

@@ -225,7 +225,7 @@ class Brain:
         return text
 
 
-    def generate_training_examples(
+    def generate_train_examples(
             self,
             task_description: str,
             num_examples: int = 5,
