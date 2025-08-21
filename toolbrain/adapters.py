@@ -56,6 +56,10 @@ class SmolAgentAdapter(BaseAgentAdapter):
     def get_trainable_model(self) -> TransformersModel:
         """Returns the agent's underlying TransformersModel."""
         return self.agent.model
+    
+    def get_tools(self) -> List[str]:
+        """Returns the list of tool names available in the agent."""
+        return [tool for tool in self.agent.tools]
 
     def run(self, query: str) -> Trace:
         """

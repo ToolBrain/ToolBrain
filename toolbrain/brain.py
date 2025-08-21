@@ -229,7 +229,8 @@ class Brain:
             self,
             task_description: str,
             num_examples: int = 5,
-            external_model: Any = None) -> List[Dict[str, Any]]:
+            external_model: Any = None,
+            external_tools: List[str] = None) -> List[Dict[str, Any]]:
         """
         Generate training examples.
 
@@ -237,6 +238,7 @@ class Brain:
             task_description: High-level description guiding example creation.
             num_examples: Number of examples to return.
             external_model: LLM provider (callable, or exposes .propose/.generate).
+            external_tools: List of tool names to use in the examples.
         Returns:
             List of dicts with keys:
                 - 'prompt' (str)
@@ -246,7 +248,8 @@ class Brain:
         """
 
         examples: List[Dict[str, Any]] = []
-        llm = self.trainable_model.model if external_model is None else external_model
+        llm = self.agent_adapter.get_trainable_model() if external_model is None  else external_model
+        tools = self.agent_adapter.get_tools() if external_tools is None else external_tools
 
         for i in range(num_examples):
             if llm is not None:

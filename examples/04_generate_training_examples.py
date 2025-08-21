@@ -1,7 +1,21 @@
 import json
 
-from smolagents import TransformersModel, CodeAgent
+from smolagents import TransformersModel, CodeAgent, tool
 from toolbrain import Brain, get_default_config
+
+@tool
+def add(a: int, b: int) -> int:
+    """
+    Add two integers.
+
+    Args:
+        a (int): First addend.
+        b (int): Second addend.
+
+    Returns:
+        int: Sum of a and b.
+    """
+    return a + b
 
 
 def main() -> None:
@@ -39,7 +53,7 @@ def main() -> None:
             "{% endfor %}"
         )
     my_agent = CodeAgent(
-        tools=[],
+        tools=[add],
         model=model,
     )
 
@@ -52,7 +66,7 @@ def main() -> None:
     examples = brain.generate_training_examples(
         task_description=description,
         num_examples=1,
-        external_model=model,
+        external_model=None,
     )
     for example in examples:
         print(example["prompt"].content)
