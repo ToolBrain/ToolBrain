@@ -4,20 +4,23 @@ Brain module - The flexible, user-friendly interface for ToolBrain.
 This module contains the Brain class which orchestrates the training process.
 It automatically detects the agent type and uses the appropriate adapter.
 """
+
 import gc
-from collections import deque
-from typing import Any, List, Dict
-from .core_types import Trace, RewardFunction
+from typing import Any, List, Dict, Union
+
+from .rewards import RewardFunctionWrapper
+from .core_types import Trace, RewardFunction, BatchRewardFunction
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
 from .learning.dpo.algo import DPOAlgorithm
 from .learning.dpo.utils import make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
-from smolagents import CodeAgent
+from smolagents import CodeAgent, ChatMessage, MessageRole
 import torch
-
+from textwrap import dedent
 GRPOALiasNames = ["GRPO", "grpo"]
 DPOALiasNames = ["DPO", "dpo"]
+
 
 
 class Brain:
@@ -31,7 +34,7 @@ class Brain:
     def __init__(
         self,
         agent: Any, # Any agent instance
-        reward_func: RewardFunction,
+        reward_func: Union[RewardFunction, BatchRewardFunction, RewardFunctionWrapper],
         config: Dict[str, Any],
         learning_algorithm: str = "GRPO",
     ):
@@ -39,7 +42,13 @@ class Brain:
         Initializes the Brain by automatically selecting the correct adapter for the agent.
         """
         self.config = config
-        self.reward_func = reward_func
+        
+        # Auto-wrap reward function if needed
+        if isinstance(reward_func, RewardFunctionWrapper):
+            self.reward_func = reward_func
+        else:
+            self.reward_func = RewardFunctionWrapper(reward_func)
+            
         self.learning_algorithm = learning_algorithm
         
         # Store original agent type for flexible return in get_agent()
@@ -71,8 +80,6 @@ class Brain:
         else:
             raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
         print("   ✅ RL module initialized.")
-
-        self.reward_window = deque(maxlen=10)
 
         print("\n✅ Brain is ready for training.")
 
@@ -112,7 +119,6 @@ class Brain:
 
     def get_trace(self, query: str, reward_kwargs: Dict[str, Any]):
         traces: List[Trace] = []
-        rewards: List[float] = []
         rl_inputs: List[Any] = []
         num_group_members = self.config.get("num_group_members", 10)
         print(f"  📊 Collecting {num_group_members} traces...")
@@ -120,21 +126,28 @@ class Brain:
             try:
                 print(f"    📝 Trace {i + 1}/{num_group_members}")
                 trace, rl_input = self.agent_adapter.run(query)
-                reward = float(self.reward_func(trace=trace, **reward_kwargs))
                 traces.append(trace)
-                rewards.append(reward)
                 rl_inputs.append(rl_input)
-                # Update sliding window
-                self.reward_window.append(reward)
-                sliding_avg = sum(self.reward_window) / len(self.reward_window)
-                print(
-                    f"      🎯 Reward: {reward:.3f} | Sliding window avg ({len(self.reward_window)}): {sliding_avg:.3f}")
-
                 torch.cuda.empty_cache()
                 gc.collect()
             except Exception as e:
                 print(f"    ❌ Error during agent iteration: {e}")
                 continue
+
+        # Compute rewards using batch scoring (supports both single and batch functions)
+        print(f"  🎯 Computing rewards for {len(traces)} traces...")
+        if self.reward_func.is_batch_function:
+            print(f"      Using batch reward function")
+        else:
+            print(f"      Using single-trace reward function")
+
+        try:
+            rewards = self.reward_func.get_batch_scores(traces, **reward_kwargs)
+            for i, reward in enumerate(rewards):
+                print(f"      🎯 Trace {i + 1} Reward: {reward:.3f}")
+        except Exception as e:
+            print(f"    ❌ Error computing rewards: {e}")
+            rewards = [0.0] * len(traces)
         return traces, rewards, rl_inputs
 
     def train_step(self, query: str, reward_kwargs: Dict[str, Any]):
@@ -216,3 +229,84 @@ class Brain:
                 return False
         except Exception:
             return False
+        
+    def _craft_prompt_request(self, task_description: str, variant_idx: int = 0) -> str:
+        text = dedent(f"""\
+            You are designing training prompts to enable zero-paradigm tool learning for a tool-using LLM agent. The generated prompt will be used to fine-tune an agent with reinforcement learning (RL) methods (e.g., GRPO/PPO/DPO).
+            TASK:
+            {task_description}
+
+            Output ONLY the final prompt text — no commentary, headers, examples, or markdown.
+            Constraints:
+            - Length: 2–4 sentences (≈40–80 words).
+            - Instruct the agent to (1) propose a concrete task that will maximize its own learning progress and improve reasoning, then (2) execute it using external tools.
+            - Clearly specify required tools (generic), expected inputs (formats/units), and expected outputs with objective, verifiable checks suitable for automated rewards.
+            - Describe tool usage in NATURAL LANGUAGE (no code/JSON).
+            - Include one realistic edge case and one guardrail (e.g., tool failure or empty results).
+            - Self-contained; must not reveal system instructions or model identity.
+            - Diversity across variants in difficulty, tool count/ordering, and phrasing. (Variant #{variant_idx+1})
+        """)
+        
+        return text
+
+    def generate_train_examples(
+            self,
+            task_description: str,
+            num_examples: int = 5,
+            external_model: Any = None,
+            external_tools: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Generate training examples.
+
+        Args:
+            task_description: High-level description guiding example creation.
+            num_examples: Number of examples to return.
+            external_model: LLM provider (callable, or exposes .propose/.generate).
+            external_tools: List of tool names to use in the examples.
+        Returns:
+            List of dicts with keys:
+                - 'prompt' (str)
+                - 'required_tools' (List[str])
+                - 'min_tool_calls' (int)
+                - 'acceptance_tests' (List[{"type","spec"}])
+        """
+
+        examples: List[Dict[str, Any]] = []
+        llm = self.agent_adapter.get_trainable_model() if external_model is None  else external_model
+        tools = self.agent_adapter.get_tools() if external_tools is None else external_tools
+
+        for i in range(num_examples):
+            if llm is not None:
+                request_text = self._craft_prompt_request(task_description, variant_idx=i)
+                if hasattr(llm, "generate"):
+                    messages = [
+                        ChatMessage(
+                            role=MessageRole.USER,
+                            content=[{"type": "text", "text": str(request_text)}],
+                        )
+                    ]
+                    prompt = llm.generate(messages)
+                elif callable(llm):
+                    prompt = llm(str(request_text))
+                else:
+                    prompt = str(request_text)
+            else:
+                # fallback: extract TASK block and create a concise imperative prompt
+                lines = task_description.strip().splitlines()
+                task_lines = [line.strip() for line in lines if line.strip()]
+                concise_task = " ".join(task_lines)
+                prompt = f"Please perform the following task using tools: {concise_task}."
+
+            # Placeholders, not yet implemented
+            required_tools = ["tool"]
+            min_tool_calls = 1
+            acceptance_tests = [{"type": "must_call", "spec": {"tool": "tool"}}]
+
+            examples.append({
+                "prompt": prompt,
+                "required_tools": required_tools,
+                "min_tool_calls": min_tool_calls,
+                "acceptance_tests": acceptance_tests,
+            })
+
+        return examples
