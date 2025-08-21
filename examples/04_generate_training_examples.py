@@ -1,7 +1,7 @@
 import json
 
-from smolagents import TransformersModel
-from toolbrain import generate_training_examples
+from smolagents import TransformersModel, CodeAgent
+from toolbrain import Brain, get_default_config
 
 
 def main() -> None:
@@ -38,8 +38,18 @@ def main() -> None:
             "{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\n'  ~ _text ~ '<|end|>\n' }}{% endif %}"
             "{% endfor %}"
         )
+    my_agent = CodeAgent(
+        tools=[],
+        model=model,
+    )
 
-    examples = generate_training_examples(
+    brain = Brain(
+        agent=my_agent,
+        reward_func=lambda x: 1.0,
+        learning_algorithm="GRPO",
+        config=get_default_config(),
+    )
+    examples = brain.generate_training_examples(
         task_description=description,
         num_examples=1,
         external_model=model,
