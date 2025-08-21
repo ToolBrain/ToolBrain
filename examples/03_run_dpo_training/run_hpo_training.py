@@ -1,5 +1,5 @@
 """
-ToolBrain Training Example - Use RL of ToolBrain for HPO.
+ToolBrain Training Example - Use RL of ToolBrain for HPO. Running with DPO instead of GRPO
 
 """
 
@@ -76,15 +76,15 @@ def main():
     brain = Brain(
         agent=my_agent,
         reward_func=reward_accuracy,
-        learning_algorithm="GRPO",
+        learning_algorithm="DPO",
         config={
             "epsilon": 0.2,  # clipping parameter
-            "beta": 0.04,  # KL divergence penalty coefficient
+            "beta": 0.1,  # KL divergence penalty coefficient
             "opt_steps": 3,  # Number of GRPO optimization steps per batch
             "lr": 1e-5,  # Learning rate for optimizer
             "max_grad_norm": 1.0,
             "chunk_len": 128,  # If not None, get_per_token_logps will process in chunks
-            "num_group_members": 1,  # The number of group members used for GRPO training steps
+            "num_group_members": 2,  # The number of group members used for DPO at least 2
             "use_bitsandbytes": use_bitsandbytes, # Whether to use bitandbytes for training
             "lora_config": LoraConfig(  # If set, the RL will perform LoRA finetuning instead of full fine-tuning
                 r=8,  # LoRA rank

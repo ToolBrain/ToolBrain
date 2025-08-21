@@ -19,4 +19,4 @@ __all__ = [
     "TraceStep",
     "BaseAgentAdapter",
     "SmolAgentAdapter"
-] 
+]

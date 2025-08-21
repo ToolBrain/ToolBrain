@@ -1,15 +1,12 @@
 from dataclasses import dataclass
 from typing import List
-import copy
 import json
-
 import torch
-import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from transformers import AutoModelForCausalLM
 
-from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
+from toolbrain.core_types import ChatSegment
+from toolbrain.learning.policy import Policy
 
 
 @dataclass(frozen=True)
@@ -157,104 +154,30 @@ def build_inputs(
     )
 
 
-def compute_per_token_logps(
-    logits: torch.Tensor,          # (B, L-1, V)
-    input_ids: torch.Tensor,       # (B, L-1)
-    chunk_len: int | None = None,  # if set, compute along L in chunks of C tokens to reduce peak memory
-) -> torch.Tensor:
-    """
-    Return per-token log-probs aligned with targets.
-    - logits: (B, L-1, V)
-    - input_ids: (B, L-1)
-    - chunk_len: optional chunk size along L for memory-friendly computation
-    Returns: (B, L-1)
-    """
-    if chunk_len is None:
-        lp = logits.log_softmax(dim=-1)  # (B, L-1, V)
-        return lp.gather(dim=-1, index=input_ids.long().unsqueeze(-1)).squeeze(-1)  # (B, L-1)
-
-    # Chunked path along sequence length
-    chunk_outputs: list[torch.Tensor] = []
-    target_len = input_ids.size(1)
-    for start_idx in range(0, target_len, chunk_len):
-        end_idx = min(start_idx + chunk_len, target_len)
-        lp = logits[:, start_idx:end_idx, :].log_softmax(dim=-1)  # (B, C, V)
-        chunk_outputs.append(
-            lp.gather(
-                dim=-1,
-                index=input_ids[:, start_idx:end_idx].long().unsqueeze(-1)).squeeze(-1)
-        )  # (B, C)
-    return torch.cat(chunk_outputs, dim=1)  # (B, L-1)
-
-class Policy(nn.Module):
-    def __init__(self, llm: AutoModelForCausalLM, tokenizer: PreTrainedTokenizerBase) -> None:
-        super().__init__()
-        self.llm = llm
-        self.tokenizer = tokenizer
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-    def to(self, device):
-        self.llm.to(device)
-        return self
-
-    def get_per_token_logps(self,
-                      input_ids: torch.Tensor,
-                      attention_mask: torch.Tensor,
-                      chunk_len: int | None = None) -> torch.Tensor:
-        """Return per-token log-probs aligned for causal LM loss
-        (predict token t from context up to t-1).
-        Output shape: (B, L-1).
-        """
-        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # shape: (B, L, V)
-        
-        # Exclude the last logit because it has no corresponding target token
-        # (there is no "next token" after the last one)
-        logits = logits[:, :-1, :]   # shape: (B, L-1, V)
-        # Exclude the first token in input_ids because its prediction is based on
-        # the context before it (no preceding token)
-        input_ids = input_ids[:, 1:] # shape: (B, L-1)
-
-        per_token_logps = compute_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # shape: (B, L-1)
-        return per_token_logps
-
-    def copy(self) -> "Policy":
-        """
-        Create a deep copy of this Policy model to the same device.
-        The copy is independent from the original: llm's parameters update on one will not affect the other.
-        """
-        llm_copy = AutoModelForCausalLM.from_config(self.llm.config)
-        llm_copy.load_state_dict(self.llm.state_dict()) 
-        llm_copy.to(next(self.llm.parameters()).device)
-
-        tokenizer_copy = copy.deepcopy(self.tokenizer)
-        return Policy(llm=llm_copy, tokenizer=tokenizer_copy)
-
 
 if __name__ == "__main__":
     from transformers import AutoModelForCausalLM, AutoTokenizer
     # Traces
-    traces: List[Trace] = [
+    traces: List[List[ChatSegment]] = [
         [
-            Turn(
-                prompt_for_model="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
-                model_completion="Thought: I'll write a short Python loop.\n```python\ns=sum(range(1,11)); print(s)\n```\n",
-                parsed_completion=ParsedCompletion(thought="thought", code="some code"),
-                tool_output="Execution logs:\n55\nLast output from code snippet:\n55",
+            ChatSegment(
+                role="other",
+                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
             ),
-            Turn(
-                prompt_for_model="Given the tool output above, provide the final answer.",
-                model_completion="Final Answer: 55",
-                parsed_completion=ParsedCompletion(),
-                tool_output="",
+            ChatSegment(
+                role="assistant", text="I calculate it myself! Final Answer: 55"
             ),
         ],
         [
-            Turn(
-                prompt_for_model="You are a math helper. Sum 1..10.",
-                model_completion="I can compute it mentally: 55.",
-                parsed_completion=ParsedCompletion(),
-            )
+            ChatSegment(
+                role="other",
+                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
+            ),
+            ChatSegment(
+                role="assistant",
+                text="<code> sum(list(range(1,11)))</code>",
+            ),
+            ChatSegment(role="other", text="Final Answer: 55"),
         ],
     ]
 
@@ -271,7 +194,7 @@ if __name__ == "__main__":
     print(f"Rewards: {rewards}")
 
     # GRPOBatch
-    batch = build_inputs(traces=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
+    batch = build_inputs(segments=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
     input_ids = batch.input_ids
     attention_mask = batch.attention_mask
     completion_mask = batch.completion_mask

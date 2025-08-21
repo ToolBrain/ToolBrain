@@ -5,9 +5,9 @@ from typing import List
 import torch
 from torch.nn.utils import clip_grad_norm_
 
-from .utils import Policy, build_inputs
+from toolbrain.learning.grpo.utils import Policy, build_inputs
 from .losses import grpo_loss
-from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
+from ...core_types import ChatSegment
 import bitsandbytes as bnb
 
 
@@ -108,7 +108,7 @@ class GRPOAlgorithm:
         # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
         #   - pi_theta_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
         #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
-        chunk_len = self.config["chunk_len"]
+        chunk_len = self.config.get("chunk_len", None)
         with torch.no_grad():
             pi_theta_old_logps = pi_theta.get_per_token_logps(
                 input_ids=input_ids,  # shape: (B, L)

@@ -1,0 +1,222 @@
+import copy
+import torch
+from torch.nn.utils import clip_grad_norm_
+import bitsandbytes as bnb
+from typing import List
+
+from toolbrain.core_types import ChatSegment
+from toolbrain.learning import Policy
+from toolbrain.learning.dpo.utils import build_inputs
+
+
+class DPOAlgorithm:
+    """Trainer that implements Direct Preference Optimization (DPO).
+
+    Usage:
+        algo = DPOAlgorithm(policy, config, ref_policy)
+        algo.train_step(chosen_segments, rejected_segments)
+    """
+
+    def __init__(
+        self,
+        initial_policy: Policy,
+        config: dict,
+        ref_policy: Policy = None,
+    ) -> None:
+        self.device = next(initial_policy.llm.parameters()).device
+
+        self.policy = initial_policy.to(self.device)
+        self.pi_ref = ref_policy if ref_policy else copy.deepcopy(initial_policy)
+        self.pi_ref = self.pi_ref.to(self.device)
+
+        self.config = config
+        self.training_steps = 0
+
+        use_bitandbytes = config.get("use_bitsandbytes", False)
+        if use_bitandbytes:
+            self.optimizer = bnb.optim.AdamW8bit(
+                self.policy.llm.parameters(),
+                lr=self.config["lr"],
+            )
+        else:
+            self.optimizer = torch.optim.AdamW(
+                self.policy.llm.parameters(),
+                lr=self.config["lr"]
+            )
+
+    def _update_policy(self, pi_theta, loss):
+        model = getattr(pi_theta, "llm", None) or getattr(pi_theta, "model", None)
+        if model is None:
+            raise AttributeError("No model found in pi_theta")
+
+        model.train()
+        self.optimizer.zero_grad()
+        loss.backward()
+        clip_grad_norm_(model.parameters(), self.config["max_grad_norm"])
+        self.optimizer.step()
+        print(f"Loss at step {self.training_steps}: {loss.item():.4f}")
+        return pi_theta
+
+    def train_step(
+        self,
+        chosen_segments: List[List[ChatSegment]],
+        rejected_segments: List[List[ChatSegment]],
+    ) -> None:
+        """
+        Run one DPO update over a batch.
+
+        Args:
+            chosen_segments: list of ChatSegment lists (preferred completions).
+            rejected_segments: list of ChatSegment lists (less-preferred completions).
+        """
+        assert len(chosen_segments) == len(rejected_segments), \
+            f"Batch mismatch: {len(chosen_segments)} chosen vs {len(rejected_segments)} rejected"
+
+        pi_theta = self.policy  # train in-place
+
+        # Build inputs for chosen and rejected
+        chosen_batch = build_inputs(segments=chosen_segments, tokenizer=pi_theta.tokenizer)
+        rejected_batch = build_inputs(segments=rejected_segments, tokenizer=pi_theta.tokenizer)
+
+        chunk_len = self.config.get("chunk_len", None)
+        # Mask of completion tokens (B, L-1)
+        chosen_completion_mask = chosen_batch.completion_mask[:, 1:].to(self.device)
+        rejected_completion_mask = rejected_batch.completion_mask[:, 1:].to(self.device)
+
+        # Per-token log-probs from current policy
+        pi_chosen_logps_per_token = pi_theta.get_per_token_logps(
+            input_ids=chosen_batch.input_ids.to(self.device),
+            attention_mask=chosen_batch.attention_mask.to(self.device),
+            chunk_len=chunk_len,
+        )  # (B, L-1)
+
+        pi_rejected_logps_per_token = pi_theta.get_per_token_logps(
+            input_ids=rejected_batch.input_ids.to(self.device),
+            attention_mask=rejected_batch.attention_mask.to(self.device),
+            chunk_len=chunk_len,
+        )  # (B, L-1)
+
+        # Per-token log-probs from reference policy
+        with torch.no_grad():
+            pi_ref_chosen_logps_per_token = self.pi_ref.get_per_token_logps(
+                input_ids=chosen_batch.input_ids.to(self.device),
+                attention_mask=chosen_batch.attention_mask.to(self.device),
+                chunk_len=chunk_len,
+            )  # (B, L-1)
+
+            pi_ref_rejected_logps_per_token = self.pi_ref.get_per_token_logps(
+                input_ids=rejected_batch.input_ids.to(self.device),
+                attention_mask=rejected_batch.attention_mask.to(self.device),
+                chunk_len=chunk_len,
+            )  # (B, L-1)
+
+        # === Sequence-level mean logps over completion tokens only ===
+        def masked_mean_logps(logps_per_token, mask):
+            # (logps * mask).sum() / mask.sum() per sequence
+            masked_sum = (logps_per_token * mask).sum(dim=1)
+            lengths = mask.sum(dim=1).clamp(min=1)
+            return masked_sum / lengths  # shape: (B,)
+
+        pi_chosen_logps = masked_mean_logps(pi_chosen_logps_per_token, chosen_completion_mask)
+        pi_rejected_logps = masked_mean_logps(pi_rejected_logps_per_token, rejected_completion_mask)
+        pi_ref_chosen_logps = masked_mean_logps(pi_ref_chosen_logps_per_token, chosen_completion_mask)
+        pi_ref_rejected_logps = masked_mean_logps(pi_ref_rejected_logps_per_token, rejected_completion_mask)
+
+        # === DPO loss ===
+        beta = self.config.get("beta", 0.1)
+        logits = beta * (
+                (pi_chosen_logps - pi_rejected_logps)
+                - (pi_ref_chosen_logps - pi_ref_rejected_logps)
+        )
+        loss = -torch.nn.functional.logsigmoid(logits).mean()
+
+        # Update step
+        pi_theta = self._update_policy(pi_theta, loss)
+
+        self.policy = pi_theta
+        self.training_steps += 1
+
+    def __repr__(self) -> str:
+        return (
+            f"DPOAlgorithm(beta={self.config.get('beta')}, "
+            f"steps={self.training_steps})"
+        )
+
+
+if __name__ == "__main__":
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    # === Batch of size 2 ===
+    chosen_segments: List[List[ChatSegment]] = [
+        # Example 1 (preferred)
+        [
+            ChatSegment(
+                role="other",
+                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
+            ),
+            ChatSegment(
+                role="assistant",
+                text="The sum of numbers from 1 to 10 is 55, using the formula n(n+1)/2."
+            ),
+        ],
+        # Example 2 (preferred)
+        [
+            ChatSegment(
+                role="other",
+                text="Translate 'Good morning' into French.",
+            ),
+            ChatSegment(
+                role="assistant",
+                text="In French, it is 'Bonjour'."
+            ),
+        ],
+    ]
+
+    rejected_segments: List[List[ChatSegment]] = [
+        # Example 1 (less-preferred)
+        [
+            ChatSegment(
+                role="other",
+                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
+            ),
+            ChatSegment(
+                role="assistant",
+                text="I think it might be 42."
+            ),
+        ],
+        # Example 2 (less-preferred)
+        [
+            ChatSegment(
+                role="other",
+                text="Translate 'Good morning' into French.",
+            ),
+            ChatSegment(
+                role="assistant",
+                text="It translates to 'Bonne nuit'."
+            ),
+        ],
+    ]
+
+    # === Policy ===
+    model_id = "gpt2"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    llm = AutoModelForCausalLM.from_pretrained(model_id)
+    initial_policy = Policy(llm=llm, tokenizer=tokenizer)
+
+    # === Config ===
+    config = {
+        "lr": 1e-5,
+        "max_grad_norm": 1.0,
+        "chunk_len": 128,
+        "beta": 0.1,
+    }
+
+    algo = DPOAlgorithm(initial_policy=initial_policy, config=config)
+
+    # === One train step with batch size 2 ===
+    algo.train_step(
+        chosen_segments=chosen_segments,
+        rejected_segments=rejected_segments,
+    )

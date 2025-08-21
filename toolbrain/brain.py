@@ -4,12 +4,20 @@ Brain module - The flexible, user-friendly interface for ToolBrain.
 This module contains the Brain class which orchestrates the training process.
 It automatically detects the agent type and uses the appropriate adapter.
 """
-
+import gc
+from collections import deque
 from typing import Any, List, Dict
 from .core_types import Trace, RewardFunction
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
-from .rl.grpo import GRPOAlgorithm, Policy 
+from .learning.dpo.algo import DPOAlgorithm
+from .learning.dpo.utils import make_dpo_pairs
+from .learning.grpo import GRPOAlgorithm
+from .learning import Policy
 from smolagents import CodeAgent
+import torch
+
+GRPOALiasNames = ["GRPO", "grpo"]
+DPOALiasNames = ["DPO", "dpo"]
 
 
 class Brain:
@@ -48,16 +56,24 @@ class Brain:
         
         # --- Initialize RL module ---
         print(f"   - Initializing RL algorithm: {learning_algorithm}...")
-        if learning_algorithm == "GRPO":
+        if learning_algorithm in  GRPOALiasNames:
             policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
             self.rl_module = GRPOAlgorithm(
                 initial_policy=policy, 
                 config=config
             )
+        elif learning_algorithm in DPOALiasNames:
+            policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
+            self.rl_module = DPOAlgorithm(
+                initial_policy=policy,
+                config=config
+            )
         else:
             raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
         print("   ✅ RL module initialized.")
-        
+
+        self.reward_window = deque(maxlen=10)
+
         print("\n✅ Brain is ready for training.")
 
     def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
@@ -94,35 +110,54 @@ class Brain:
         
         print("\n🎉 Training finished!")
 
-    def train_step(self, query: str, reward_kwargs: Dict[str, Any]):
-        """Executes a single training step for a given query."""
-        print(f"\n🔄 Training step for query: '{query[:50]}...'")
-        num_group_members = self.config.get("num_group_members", 10)
-        
+    def get_trace(self, query: str, reward_kwargs: Dict[str, Any]):
         traces: List[Trace] = []
         rewards: List[float] = []
         rl_inputs: List[Any] = []
-
+        num_group_members = self.config.get("num_group_members", 10)
         print(f"  📊 Collecting {num_group_members} traces...")
         for i in range(num_group_members):
             try:
-                print(f"    📝 Trace {i+1}/{num_group_members}")
+                print(f"    📝 Trace {i + 1}/{num_group_members}")
                 trace, rl_input = self.agent_adapter.run(query)
                 reward = float(self.reward_func(trace=trace, **reward_kwargs))
                 traces.append(trace)
                 rewards.append(reward)
                 rl_inputs.append(rl_input)
-                print(f"      🎯 Reward: {reward:.3f}")
+                # Update sliding window
+                self.reward_window.append(reward)
+                sliding_avg = sum(self.reward_window) / len(self.reward_window)
+                print(
+                    f"      🎯 Reward: {reward:.3f} | Sliding window avg ({len(self.reward_window)}): {sliding_avg:.3f}")
+
+                torch.cuda.empty_cache()
+                gc.collect()
             except Exception as e:
                 print(f"    ❌ Error during agent iteration: {e}")
                 continue
+        return traces, rewards, rl_inputs
+
+    def train_step(self, query: str, reward_kwargs: Dict[str, Any]):
+        """Executes a single training step for a given query."""
+        print(f"\n🔄 Training step for query: '{query[:50]}...'")
+        num_group_members = self.config.get("num_group_members", 10)
+        if num_group_members == 1 and self.learning_algorithm in DPOALiasNames:
+            raise NotImplementedError(f"Algorithm '{self.learning_algorithm}' requires num_group_members > 1!")
+
+        traces, rewards, rl_inputs = self.get_trace(query, reward_kwargs)
         
         if not traces:
             print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
             return
-        
-        print(f"  🧠 Running RL training step with {len(traces)} traces...")
-        self.rl_module.train_step(rl_inputs, rewards)
+
+        if self.learning_algorithm in GRPOALiasNames:
+            print(f"  🧠 Running RL training step with {len(traces)} traces...")
+            self.rl_module.train_step(rl_inputs, rewards)
+        elif self.learning_algorithm in DPOALiasNames:
+            print(f"  🧠 Sample chosen and rejected pairs from traces...")
+            chosen_segments, rejected_segments = make_dpo_pairs(rl_inputs, rewards)
+            print(f"  🧠 Running DPO with the number of sampled pairs:", len(chosen_segments))
+            self.rl_module.train_step(chosen_segments, rejected_segments)
         print(f"  ✅ RL training step completed")
 
     def get_agent(self) -> Any:
