@@ -65,6 +65,16 @@ class RewardFunction(Protocol):
     def __call__(self, trace: Trace, **kwargs: Any) -> float: ...
 
 
+class BatchRewardFunction(Protocol):
+    """
+    Protocol for batch reward functions that process multiple traces at once.
+    
+    This is useful for LLM-as-a-Judge functions that need to compare traces
+    against each other for ranking or relative scoring.
+    """
+    def __call__(self, traces: List[Trace], **kwargs: Any) -> List[float]: ...
+
+
 class ChatSegment(TypedDict):
     role: str
     text: str

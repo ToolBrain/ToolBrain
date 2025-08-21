@@ -6,8 +6,9 @@ keyword arguments so they can be composed in many settings, including
 cases without a single gold answer.
 """
 
-from typing import Any, Optional
-from .core_types import Trace
+from typing import Any, Optional, List, Union, Callable
+from .core_types import Trace, RewardFunction, BatchRewardFunction
+import re
 
 def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
     """
@@ -107,13 +108,14 @@ def reward_combined(trace: Trace, **kwargs: Any) -> float:
     return max(0.0, min(1.0, total))
 
 
-# --------------------------
-# LLM-as-a-Judge Reward
-# --------------------------
-
-import os
-import re
-from openai import OpenAI
+# --------------------------------------------------
+# LLM-as-a-Judge Reward (GRPO-Compatible via Ranking)
+# --------------------------------------------------
+try:
+    import litellm
+    litellm.set_verbose=False
+except ImportError:
+    litellm = None
 
 def _format_trace_for_judging(trace: Trace, max_chars: int = 4000) -> str:
     """
@@ -147,69 +149,236 @@ def _format_trace_for_judging(trace: Trace, max_chars: int = 4000) -> str:
         return text[: max_chars - 30] + "\n... [truncated]"
     return text
 
+def _format_traces_for_ranking(traces: List[Trace]) -> str:
+    """Formats a list of traces into a single string for an LLM judge."""
+    parts = []
+    for i, trace in enumerate(traces):
+        trace_text = _format_trace_for_judging(trace, max_chars=2000)
+        parts.append(f"<trajectory id='{i+1}'>\n{trace_text}\n</trajectory>")
+    return "\n\n".join(parts)
 
-def _extract_score(text: str) -> Optional[float]:
-    # Find a float in [0, 1] range
-    matches = re.findall(r"\b([01](?:\.\d+)?)\b", text)
-    if not matches:
-        return None
-    # Prefer the first number between 0 and 1 inclusive
+def _parse_ranking_from_llm(response_text: str, num_traces: int) -> Optional[List[int]]:
+    """
+    Extracts a ranked list of trajectory IDs from the judge's response.
+    This version is more robust and looks for a list-like structure.
+    """
     try:
-        val = float(matches[0])
-        if 0.0 <= val <= 1.0:
-            return val
+        # 1. Cố gắng tìm một cấu trúc giống list, ví dụ: [3, 1, 2] hoặc (3, 1, 2)
+        list_match = re.search(r'[\(\[]\s*(\d+(?:\s*,\s*\d+)*)\s*[\)\]]', response_text)
+        
+        if list_match:
+            # 2. Nếu tìm thấy, chỉ xử lý các số bên trong
+            numbers_str = list_match.group(1)
+            ranked_ids = [int(n.strip()) for n in numbers_str.split(',')]
+        else:
+            # 3. Nếu không, quay lại phương pháp cũ là tìm tất cả các số
+            numbers = re.findall(r'\d+', response_text)
+            ranked_ids = [int(n) for n in numbers]
+
+        # 4. Xác thực kết quả
+        #    Thêm kiểm tra không có số trùng lặp
+        if (len(ranked_ids) == num_traces and 
+            all(1 <= i <= num_traces for i in ranked_ids) and
+            len(set(ranked_ids)) == num_traces):
+            return ranked_ids
+        else:
+            print(f"⚠️ LLM Judge Parsing Warning: Invalid ranking received. Got: {ranked_ids} from text: '{response_text}'")
+            return None
     except Exception:
         return None
-    return None
+
+def _convert_ranking_to_scores(ranking: List[int], num_traces: int) -> List[float]:
+    """Converts a ranked list of IDs into a list of scores using linear spacing."""
+    scores = [0.0] * num_traces
+    step = 1.0 / (num_traces - 1) if num_traces > 1 else 0.0
+    
+    for rank, trace_id in enumerate(ranking):
+        score = 1.0 - (rank * step)
+        original_index = trace_id - 1
+        scores[original_index] = score
+        
+    return scores
 
 
-def reward_llm_judge(trace: Trace, **kwargs: Any) -> float:
+def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[float]:
     """
-    LLM-as-a-Judge reward that does not require a gold answer.
+    An LLM-as-a-Judge reward function compatible with GRPO.
+    
+    It asks an LLM judge to RANK the given traces, then converts that
+    ranking into a list of numerical scores. This function operates on a BATCH of traces.
 
-    Usage patterns:
-    - Provide `query` (recommended) so the judge can assess relevance/faithfulness.
-    - Provide `system_prompt` to customize the judging criteria.
-    - Provide `model` (default: 'gpt-4o-mini') and `openai_api_key` (or set OPENAI_API_KEY env var).
-    - Optionally pass a pre-initialized `openai_client` via kwargs to reuse connections.
+    Args:
+        traces: The list of traces to be judged.
+        **kwargs: Must include:
+            - query: The original user query.
+            - judge_model: The model ID for the judge (e.g., "gemini/gemini-1.5-flash").
 
-    Returns a float in [0, 1]. Falls back to 0.0 on error.
+    Returns:
+        A list of float scores, one for each trace, in the original order.
     """
-    if OpenAI is None:
-        return 0.0
+    if litellm is None:
+        print("⚠️ LiteLLM is not installed. Skipping LLM judge. `pip install litellm`")
+        return [0.5] * len(traces)
 
-    query = kwargs.get("query", "")
-    system_prompt = kwargs.get(
-        "system_prompt",
-        (
-            "You are a strict grader. Score the agent's solution quality from 0 to 1.\n"
-            "Consider correctness, coherence, safety, and adherence to the user's query.\n"
-            "Return ONLY a single number between 0 and 1 with up to 2 decimal places."
-        ),
+    if not traces:
+        return []
+
+    num_traces = len(traces)
+    query = kwargs.get("query")
+    judge_model = kwargs.get("judge_model")
+
+    if not all([query, judge_model]):
+        raise ValueError("`reward_llm_judge_via_ranking` requires 'query' and 'judge_model' in kwargs.")
+
+    # 1. Prepare prompt for judge
+    traces_str = _format_traces_for_ranking(traces)
+    system_prompt = (
+        "You are a fair and impartial AI performance evaluator. "
+        "Your task is to rank multiple agent trajectories based on their quality."
+        "You output ONLY the requested format and nothing else."
     )
-    model = kwargs.get("model", "gpt-4o-mini")
-    api_key = kwargs.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+    user_prompt = f"""User Query:
+{query}
 
+Agent Trajectories:
+{traces_str}
+
+---
+INSTRUCTION:
+Review all trajectories above. Rank them from BEST to WORST based on correctness, efficiency, and adherence to the query.
+Your response MUST be a single line containing ONLY a Python list of the trajectory IDs in ranked order. Do not add any explanation or introductory text.
+
+Example format: [3, 1, 2]
+"""
+
+    # 2. Call LLM Judge
     try:
-        client = kwargs.get("openai_client") or OpenAI(api_key=api_key)
-        trace_text = _format_trace_for_judging(trace)
-        user_prompt = (
-            f"User Query:\n{query}\n\n"
-            f"Agent Trace (steps):\n{trace_text}\n\n"
-            "Score this attempt strictly in [0, 1]."
-        )
-
-        resp = client.chat.completions.create(
-            model=model,
+        print(f"    ⚖️  Sending {num_traces} traces to LLM Judge ({judge_model}) for ranking...")
+        response = litellm.completion(
+            model=judge_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
-            max_tokens=8,
+            max_tokens=100 
         )
-        content = resp.choices[0].message.content or ""
-        score = _extract_score(content)
-        return float(score) if score is not None else 0.0
-    except Exception:
-        return 0.0 
+        response_text = response["choices"][0]["message"]["content"] or ""
+        
+        print(f"    ✅ LLM Judge response: {response_text}")
+        
+        # 3. Parse ranking from result
+        ranking = _parse_ranking_from_llm(response_text, num_traces)
+        
+        if ranking:
+            # 4. Convert ranking to scores
+            scores = _convert_ranking_to_scores(ranking, num_traces)
+            print(f"    ✅ LLM Judge ranked traces as {ranking}, converted to scores: {[f'{s:.2f}' for s in scores]}")
+            return scores
+        else:
+            print("    ⚠️ LLM Judge failed to provide a valid ranking. Returning neutral rewards.")
+            return [0.5] * num_traces
+
+    except Exception as e:
+        print(f"    ❌ Error calling LLM Judge via LiteLLM: {e}")
+        return [0.5] * num_traces
+
+
+# --------------------------------------------------
+# Dynamic Reward Wrapper for Supporting Both Types
+# --------------------------------------------------
+
+class RewardFunctionWrapper:
+    """
+    Dynamic wrapper that can handle both single-trace and batch reward functions.
+    
+    This allows Brain to use a unified interface regardless of reward function type.
+    """
+    
+    def __init__(self, reward_func: Union[RewardFunction, BatchRewardFunction]):
+        """
+        Initialize wrapper with either single-trace or batch reward function.
+        
+        Args:
+            reward_func: Either a RewardFunction (trace -> float) or 
+                        BatchRewardFunction (traces -> List[float])
+        """
+        self.reward_func = reward_func
+        self._is_batch_function = self._detect_batch_function(reward_func)
+        
+    def _detect_batch_function(self, func: Callable) -> bool:
+        """
+        Detect if function is a batch function by checking its signature.
+        
+        Batch functions typically have 'traces' as first parameter.
+        Single functions have 'trace' as first parameter.
+        """
+        import inspect
+        try:
+            sig = inspect.signature(func)
+            params = list(sig.parameters.keys())
+            if params:
+                first_param = params[0]
+                # Batch functions typically use 'traces' (plural)
+                # Single functions use 'trace' (singular)  
+                return first_param == 'traces'
+            return False
+        except Exception:
+            # Assume single-trace function
+            return False
+    
+    def __call__(self, trace: Trace, **kwargs: Any) -> float:
+        """
+        Unified interface that always accepts single trace and returns single score.
+        
+        For batch functions, we need to collect traces and call in batches.
+        This method should not be called directly - use in Brain context.
+        """
+        if self._is_batch_function:
+            raise ValueError("Batch reward function cannot be called with single trace. Use get_batch_scores instead.")
+        else:
+            return self.reward_func(trace=trace, **kwargs)
+    
+    def get_batch_scores(self, traces: List[Trace], **kwargs: Any) -> List[float]:
+        """
+        Get scores for a batch of traces.
+        
+        For single-trace functions, applies function to each trace individually.
+        For batch functions, calls function once with all traces.
+        """
+        if self._is_batch_function:
+            return self.reward_func(traces=traces, **kwargs)
+        else:
+            # Apply single-trace function to each trace
+            scores = []
+            for trace in traces:
+                try:
+                    score = self.reward_func(trace=trace, **kwargs)
+                    scores.append(float(score))
+                except Exception as e:
+                    print(f"⚠️ Error computing reward for trace: {e}")
+                    scores.append(0.0)
+            return scores
+    
+    @property
+    def is_batch_function(self) -> bool:
+        """Returns True if wrapped function is a batch function."""
+        return self._is_batch_function
+
+
+# --------------------------------------------------
+# Convenience Functions for Easy Usage
+# --------------------------------------------------
+
+def create_reward_function(func: Union[RewardFunction, BatchRewardFunction]) -> RewardFunctionWrapper:
+    """
+    Convenience function to create a RewardFunctionWrapper.
+    
+    Usage:
+        # Single trace function
+        reward_func = create_reward_function(reward_exact_match)
+        
+        # Batch function  
+        reward_func = create_reward_function(reward_llm_judge_via_ranking)
+    """
+    return RewardFunctionWrapper(func)
