@@ -5,10 +5,11 @@ This module contains the Brain class which orchestrates the training process.
 It automatically detects the agent type and uses the appropriate adapter.
 """
 
-from typing import Any, List, Dict
-from .core_types import Trace, RewardFunction
+from typing import Any, List, Dict, Union
+from .core_types import Trace, RewardFunction, BatchRewardFunction
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
 from .rl.grpo import GRPOAlgorithm, Policy 
+from .rewards import RewardFunctionWrapper
 from smolagents import CodeAgent
 
 
@@ -23,7 +24,7 @@ class Brain:
     def __init__(
         self,
         agent: Any, # Any agent instance
-        reward_func: RewardFunction,
+        reward_func: Union[RewardFunction, BatchRewardFunction, RewardFunctionWrapper],
         config: Dict[str, Any],
         learning_algorithm: str = "GRPO",
     ):
@@ -31,7 +32,13 @@ class Brain:
         Initializes the Brain by automatically selecting the correct adapter for the agent.
         """
         self.config = config
-        self.reward_func = reward_func
+        
+        # Auto-wrap reward function if needed
+        if isinstance(reward_func, RewardFunctionWrapper):
+            self.reward_func = reward_func
+        else:
+            self.reward_func = RewardFunctionWrapper(reward_func)
+            
         self.learning_algorithm = learning_algorithm
         
         # Store original agent type for flexible return in get_agent()
@@ -108,11 +115,8 @@ class Brain:
             try:
                 print(f"    📝 Trace {i+1}/{num_group_members}")
                 trace, rl_input = self.agent_adapter.run(query)
-                reward = float(self.reward_func(trace=trace, **reward_kwargs))
                 traces.append(trace)
-                rewards.append(reward)
                 rl_inputs.append(rl_input)
-                print(f"      🎯 Reward: {reward:.3f}")
             except Exception as e:
                 print(f"    ❌ Error during agent iteration: {e}")
                 continue
@@ -120,6 +124,21 @@ class Brain:
         if not traces:
             print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
             return
+        
+        # Compute rewards using batch scoring (supports both single and batch functions)
+        print(f"  🎯 Computing rewards for {len(traces)} traces...")
+        if self.reward_func.is_batch_function:
+            print(f"      Using batch reward function")
+        else:
+            print(f"      Using single-trace reward function")
+            
+        try:
+            rewards = self.reward_func.get_batch_scores(traces, **reward_kwargs)
+            for i, reward in enumerate(rewards):
+                print(f"      🎯 Trace {i+1} Reward: {reward:.3f}")
+        except Exception as e:
+            print(f"    ❌ Error computing rewards: {e}")
+            rewards = [0.0] * len(traces)
         
         print(f"  🧠 Running RL training step with {len(traces)} traces...")
         self.rl_module.train_step(rl_inputs, rewards)

@@ -63,6 +63,8 @@ def compute_advantages(rewards: torch.Tensor | List[float]) -> torch.Tensor:
     """
     if not isinstance(rewards, torch.Tensor):
         rewards = torch.tensor(rewards, dtype=torch.float32)
+    if rewards.numel() == 1:
+        return rewards
     mean = rewards.mean()
     std = rewards.std(unbiased=False)
     normalized_r = (rewards - mean) / (std + 1e-8)
@@ -80,8 +82,6 @@ def build_inputs(
     Args:
         segments: Batch of chat segments. Each chat segment is a list of `ChatSegment` dicts. A `ChatSegment` contains:
             - role: role of tje segment, either assistant or other
-            - start: start position of the  text of the chat segment in the chat history
-            - end: end position of the  text of the chat segment in the chat history
             - text: text of the chat segment in the chat history
         tokenizer: A HuggingFace tokenizer (already loaded). `pad_token` should be set.
         rewards: A list of reward-per-trace (final reward). The same scalar is expanded along the time dimension of that trace.

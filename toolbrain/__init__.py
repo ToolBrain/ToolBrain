@@ -12,12 +12,15 @@ from .brain import Brain
 from .core_types import Trace, TraceStep
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
 from .example_gen import generate_training_examples
+from .rewards import RewardFunctionWrapper, create_reward_function
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "Brain", 
     "Trace", 
     "TraceStep",
     "BaseAgentAdapter",
-    "SmolAgentAdapter"
+    "SmolAgentAdapter",
+    "RewardFunctionWrapper",
+    "create_reward_function"
 ] 
