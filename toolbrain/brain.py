@@ -11,6 +11,7 @@ from typing import Any, List, Dict, Union
 
 import numpy as np
 
+from .learning.supervised.algo import SupervisedAlgorithm
 from .rewards import RewardFunctionWrapper
 from .core_types import Trace, RewardFunction, BatchRewardFunction
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
@@ -23,7 +24,7 @@ import torch
 from textwrap import dedent
 GRPOALiasNames = ["GRPO", "grpo"]
 DPOALiasNames = ["DPO", "dpo"]
-
+SupervisedALiasNames = ["Supervised", "supervised", "supervise"]
 
 
 class Brain:
@@ -67,22 +68,28 @@ class Brain:
         trainable_model = self.agent_adapter.get_trainable_model()
         
         # --- Initialize RL module ---
-        print(f"   - Initializing RL algorithm: {learning_algorithm}...")
+        print(f"   - Initializing learning algorithm: {learning_algorithm}...")
         if learning_algorithm in  GRPOALiasNames:
             policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
-            self.rl_module = GRPOAlgorithm(
+            self.learning_module = GRPOAlgorithm(
                 initial_policy=policy, 
                 config=config
             )
         elif learning_algorithm in DPOALiasNames:
             policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
-            self.rl_module = DPOAlgorithm(
+            self.learning_module = DPOAlgorithm(
+                initial_policy=policy,
+                config=config
+            )
+        elif learning_algorithm in SupervisedALiasNames:
+            policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
+            self.learning_module = SupervisedAlgorithm(
                 initial_policy=policy,
                 config=config
             )
         else:
             raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
-        print("   ✅ RL module initialized.")
+        print("   ✅ Learning module initialized.")
         self.reward_buffer = deque(maxlen=10)
         print("\n✅ Brain is ready for training.")
 
@@ -105,6 +112,7 @@ class Brain:
         Args:
             dataset: A list of training examples, where each example is a dict
                      (e.g., {"query": "...", "gold_answer": "..."}).
+                     For supervised training the query is a list of text segments with role information
             num_iterations: The number of training iterations (epochs).
         """
         print("\n🚀 Starting training...")
@@ -112,10 +120,10 @@ class Brain:
             print(f"\n--- Iteration {i+1}/{num_iterations} ---")
             
             for example in dataset:
-                query = example.get("query")
-                if not query:
-                    continue
-                
+                if self.learning_algorithm in GRPOALiasNames or self.learning_algorithm in DPOALiasNames:
+                    query = example.get("query")
+                elif self.learning_algorithm in SupervisedALiasNames:
+                    query = example
                 self.train_step(query=query, reward_kwargs=example)
         
         print("\n🎉 Training finished!")
@@ -153,29 +161,30 @@ class Brain:
             rewards = [0.0] * len(traces)
         return traces, rewards, rl_inputs
 
-    def train_step(self, query: str, reward_kwargs: Dict[str, Any]):
+    def train_step(self, query: Any, reward_kwargs: Dict[str, Any]):
         """Executes a single training step for a given query."""
         print(f"\n🔄 Training step for query: '{query[:50]}...'")
         num_group_members = self.config.get("num_group_members", 10)
         if num_group_members == 1 and self.learning_algorithm in DPOALiasNames:
             raise NotImplementedError(f"Algorithm '{self.learning_algorithm}' requires num_group_members > 1!")
 
-        traces, rewards, rl_inputs = self.get_trace(query, reward_kwargs)
-
-        if not traces:
-            print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
-            return
-
-        # ✅ Update reward buffer
-        self.reward_buffer.extend(rewards)
-        avg_reward = np.mean(self.reward_buffer)
-        print(
-            f"📈 Sliding window avg reward (last {len(self.reward_buffer)}): {avg_reward:.4f}")
+        if self.learning_algorithm in GRPOALiasNames or  self.learning_algorithm in DPOALiasNames:
+            traces, rewards, rl_inputs = self.get_trace(query, reward_kwargs)
+            # ✅ Update reward buffer
+            self.reward_buffer.extend(rewards)
+            avg_reward = np.mean(self.reward_buffer)
+            print(
+                f"📈 Sliding window avg reward (last {len(self.reward_buffer)}): {avg_reward:.4f}")
+            if not traces:
+                print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
+                return
+        elif self.learning_algorithm in SupervisedALiasNames:
+            rl_inputs = query
 
         if self.learning_algorithm in GRPOALiasNames:
             print(f"  🧠 Running RL training step with {len(traces)} traces...")
-            self.rl_module.train_step(rl_inputs, rewards)
-
+            self.learning_module.train_step(rl_inputs, rewards)
+            print(f"  ✅ RL training step completed")
         elif self.learning_algorithm in DPOALiasNames:
             print(f"  🧠 Sample chosen and rejected pairs from traces...")
             chosen_segments, rejected_segments = make_dpo_pairs(rl_inputs, rewards)
@@ -190,11 +199,14 @@ class Brain:
                 rejected_batch = rejected_segments[start:end]
                 print(f"    🔹 Training on minibatch {start // batch_size + 1} "
                       f"with {len(chosen_batch)} pairs...")
-                self.rl_module.train_step(chosen_batch, rejected_batch)
+                self.learning_module.train_step(chosen_batch, rejected_batch)
                 torch.cuda.empty_cache()
                 gc.collect()
+            print(f"  ✅ RL training step completed")
+        elif self.learning_algorithm in SupervisedALiasNames:
+            self.learning_module.train_step([rl_inputs])
+            print(f"  ✅ Supervised training step completed")
 
-        print(f"  ✅ RL training step completed")
 
     def get_agent(self) -> Any:
         """
