@@ -6,7 +6,10 @@ It automatically detects the agent type and uses the appropriate adapter.
 """
 
 import gc
+from collections import deque
 from typing import Any, List, Dict, Union
+
+import numpy as np
 
 from .rewards import RewardFunctionWrapper
 from .core_types import Trace, RewardFunction, BatchRewardFunction
@@ -80,7 +83,7 @@ class Brain:
         else:
             raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
         print("   ✅ RL module initialized.")
-
+        self.reward_buffer = deque(maxlen=10)
         print("\n✅ Brain is ready for training.")
 
     def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
@@ -158,19 +161,39 @@ class Brain:
             raise NotImplementedError(f"Algorithm '{self.learning_algorithm}' requires num_group_members > 1!")
 
         traces, rewards, rl_inputs = self.get_trace(query, reward_kwargs)
-        
+
         if not traces:
             print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
             return
 
+        # ✅ Update reward buffer
+        self.reward_buffer.extend(rewards)
+        avg_reward = np.mean(self.reward_buffer)
+        print(
+            f"📈 Sliding window avg reward (last {len(self.reward_buffer)}): {avg_reward:.4f}")
+
         if self.learning_algorithm in GRPOALiasNames:
             print(f"  🧠 Running RL training step with {len(traces)} traces...")
             self.rl_module.train_step(rl_inputs, rewards)
+
         elif self.learning_algorithm in DPOALiasNames:
             print(f"  🧠 Sample chosen and rejected pairs from traces...")
             chosen_segments, rejected_segments = make_dpo_pairs(rl_inputs, rewards)
-            print(f"  🧠 Running DPO with the number of sampled pairs:", len(chosen_segments))
-            self.rl_module.train_step(chosen_segments, rejected_segments)
+            total_pairs = len(chosen_segments)
+            print(f"  🧠 Running DPO with total sampled pairs: {total_pairs}")
+
+            # minibatch training
+            batch_size = self.config.get("batch_size", 1)
+            for start in range(0, total_pairs, batch_size):
+                end = start + batch_size
+                chosen_batch = chosen_segments[start:end]
+                rejected_batch = rejected_segments[start:end]
+                print(f"    🔹 Training on minibatch {start // batch_size + 1} "
+                      f"with {len(chosen_batch)} pairs...")
+                self.rl_module.train_step(chosen_batch, rejected_batch)
+                torch.cuda.empty_cache()
+                gc.collect()
+
         print(f"  ✅ RL training step completed")
 
     def get_agent(self) -> Any:
