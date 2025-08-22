@@ -1,0 +1,4 @@
+sphinx>=4.0
+sphinx-autobuild
+sphinx-rtd-theme
+myst-parser

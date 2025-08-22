@@ -10,6 +10,7 @@ from typing import Any
 from peft import LoraConfig
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from smolagents import CodeAgent, TransformersModel, tool
 from toolbrain import Brain, Trace
