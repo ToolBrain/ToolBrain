@@ -131,14 +131,16 @@ class Brain:
     def get_trace(self, query: str, reward_kwargs: Dict[str, Any]):
         traces: List[Trace] = []
         rl_inputs: List[Any] = []
+        raw_memory_collection: List[List[Any]] = []  # Collection of raw memory steps
         num_group_members = self.config.get("num_group_members", 10)
         print(f"  📊 Collecting {num_group_members} traces...")
         for i in range(num_group_members):
             try:
                 print(f"    📝 Trace {i + 1}/{num_group_members}")
-                trace, rl_input = self.agent_adapter.run(query)
+                trace, rl_input, raw_memory_steps = self.agent_adapter.run(query)
                 traces.append(trace)
                 rl_inputs.append(rl_input)
+                raw_memory_collection.append(raw_memory_steps)
                 torch.cuda.empty_cache()
                 gc.collect()
             except Exception as e:
@@ -153,7 +155,12 @@ class Brain:
             print(f"      Using single-trace reward function")
 
         try:
-            rewards = self.reward_func.get_batch_scores(traces, **reward_kwargs)
+            # Add raw memory steps to reward_kwargs for advanced analysis (optional)
+            enhanced_reward_kwargs = {
+                **reward_kwargs,
+                "raw_memory_collection": raw_memory_collection  # List of raw memory steps for each trace
+            }
+            rewards = self.reward_func.get_batch_scores(traces, **enhanced_reward_kwargs)
             for i, reward in enumerate(rewards):
                 print(f"      🎯 Trace {i + 1} Reward: {reward:.3f}")
         except Exception as e:

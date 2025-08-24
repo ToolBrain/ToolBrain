@@ -117,44 +117,36 @@ try:
 except ImportError:
     litellm = None
 
-def _format_trace_for_judging(trace: Trace, max_chars: int = 4000) -> str:
-    """
-    Format the new Trace = List[Turn] structure for LLM judging.
-    
-    Updated for new Trace = List[Turn] structure.
-    """
-    parts = []
-    for i, turn in enumerate(trace):
-        parts.append(f"=== Turn {i+1} ===")
-        parts.append(f"Prompt: {turn['prompt_for_model'][:200]}...")
-        parts.append(f"Completion: {turn['model_completion']}")
-        
-        # Add parsed completion details
-        parsed = turn['parsed_completion']
-        if parsed.get('thought'):
-            parts.append(f"Thought: {parsed['thought']}")
-        if parsed.get('tool_code'):
-            parts.append(f"Tool Code: {parsed['tool_code']}")
-        if parsed.get('final_answer'):
-            parts.append(f"Final Answer: {parsed['final_answer']}")
-        
-        # Add tool output if present
-        if turn['tool_output']:
-            parts.append(f"Tool Output: {turn['tool_output']}")
-        
-        parts.append("")  # Empty line between turns
-    
-    text = "\n".join(parts)
-    if len(text) > max_chars:
-        return text[: max_chars - 30] + "\n... [truncated]"
-    return text
-
 def _format_traces_for_ranking(traces: List[Trace]) -> str:
-    """Formats a list of traces into a single string for an LLM judge."""
+    """
+    Formats a list of traces into a single string for an LLM judge.
+    Uses the pre-formatted conversation text from smolagents utilities for consistency.
+    """
     parts = []
     for i, trace in enumerate(traces):
-        trace_text = _format_trace_for_judging(trace, max_chars=2000)
-        parts.append(f"<trajectory id='{i+1}'>\n{trace_text}\n</trajectory>")
+        # Use the formatted conversation text that was generated using smolagents utilities
+        # This ensures 100% consistency with the training data format
+        if trace and len(trace) > 0:
+            formatted_text = trace[0].get("formatted_conversation", "")
+            
+            # If no formatted text available, fall back to simple representation
+            if not formatted_text:
+                trace_parts = []
+                for turn in trace:
+                    if turn.get('model_completion'):
+                        trace_parts.append(turn['model_completion'])
+                    if turn.get('tool_output'):
+                        trace_parts.append(f"Tool Output: {turn['tool_output']}")
+                formatted_text = "\n".join(trace_parts)
+            
+            # Truncate if too long
+            if len(formatted_text) > 2000:
+                formatted_text = formatted_text[:1970] + "\n... [truncated]"
+                
+            parts.append(f"<trajectory id='{i+1}'>\n{formatted_text}\n</trajectory>")
+        else:
+            parts.append(f"<trajectory id='{i+1}'>\n[Empty trace]\n</trajectory>")
+    
     return "\n\n".join(parts)
 
 def _parse_ranking_from_llm(response_text: str, num_traces: int) -> Optional[List[int]]:
@@ -163,20 +155,20 @@ def _parse_ranking_from_llm(response_text: str, num_traces: int) -> Optional[Lis
     This version is more robust and looks for a list-like structure.
     """
     try:
-        # 1. Cố gắng tìm một cấu trúc giống list, ví dụ: [3, 1, 2] hoặc (3, 1, 2)
+        # 1. Find a list-like structure, e.g., [3, 1, 2] or (3, 1, 2)
         list_match = re.search(r'[\(\[]\s*(\d+(?:\s*,\s*\d+)*)\s*[\)\]]', response_text)
         
         if list_match:
-            # 2. Nếu tìm thấy, chỉ xử lý các số bên trong
+            # 2. If found, only process the numbers inside
             numbers_str = list_match.group(1)
             ranked_ids = [int(n.strip()) for n in numbers_str.split(',')]
         else:
-            # 3. Nếu không, quay lại phương pháp cũ là tìm tất cả các số
+            # 3. If not found, revert to the old method of finding all numbers
             numbers = re.findall(r'\d+', response_text)
             ranked_ids = [int(n) for n in numbers]
 
-        # 4. Xác thực kết quả
-        #    Thêm kiểm tra không có số trùng lặp
+        # 4. Validate the result
+        #    Add check for duplicate numbers
         if (len(ranked_ids) == num_traces and 
             all(1 <= i <= num_traces for i in ranked_ids) and
             len(set(ranked_ids)) == num_traces):
@@ -206,6 +198,9 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
     
     It asks an LLM judge to RANK the given traces, then converts that
     ranking into a list of numerical scores. This function operates on a BATCH of traces.
+    
+    Uses pre-formatted conversation text from smolagents utilities for consistency
+    with training data format.
 
     Args:
         traces: The list of traces to be judged.

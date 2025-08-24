@@ -61,21 +61,35 @@ class SmolAgentAdapter(BaseAgentAdapter):
         """Returns the list of tool names available in the agent."""
         return [tool for tool in self.agent.tools]
 
-    def run(self, query: str) -> Trace:
+    def run(self, query: str):
         """
         Executes the agent and then extracts a structured, high-fidelity trace
         from the agent's memory.
+        
+        Returns:
+            tuple: (structured_trace, rl_input, raw_memory_steps)
+                - structured_trace: Trace (List[Turn]) - processed trace for standard use
+                - rl_input: Any - input prepared for RL training 
+                - raw_memory_steps: List[Any] - raw agent memory steps for advanced analysis
         """
         print(f"🚀 Adapter is calling agent.run() for query: '{query[:50]}...'")
         
         try:
             self.agent.run(query, reset=True)
             
-            structured_trace= self._extract_trace_from_memory()
+            # Extract structured trace and RL input as before
+            structured_trace = self._extract_trace_from_memory()
             rl_input = self._build_input_for_rl_from_memory()
+            
+            # Capture raw memory steps for advanced analysis
+            raw_memory_steps = []
+            if hasattr(self.agent, 'memory') and hasattr(self.agent.memory, 'steps'):
+                # Create a copy to avoid reference issues
+                raw_memory_steps = list(self.agent.memory.steps)
 
-            print(f"✅ Agent run completed. Extracted a trace with {len(structured_trace)} turns.")
-            return structured_trace, rl_input
+            print(f"✅ Agent run completed. Extracted a trace with {len(structured_trace)} turns, "
+                  f"and {len(raw_memory_steps)} raw memory steps.")
+            return structured_trace, rl_input, raw_memory_steps
 
         except Exception as e:
             print(f"❌ Error during agent.run() or trace extraction: {e}")
@@ -87,18 +101,38 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 "model_completion": f"Adapter/Agent Runtime Error: {str(e)}",
                 "parsed_completion": {"thought": None, "tool_code": None, "final_answer": f"Adapter/Agent Runtime Error: {str(e)}"},
                 "tool_output": None,
-                "action_output": None
+                "action_output": None,
+                "formatted_conversation": None
             }
-            return [error_turn], None
+            return [error_turn], None, []
 
     def _extract_trace_from_memory(self) -> Trace:
         """
         Parses the agent's internal memory into our standardized Trace format.
         This version leverages pre-parsed fields from ActionStep where possible
         and parses the rest from the raw model_output.
+        
+        Also generates formatted conversation text using smolagents utilities
+        for consistent formatting with training data.
         """
         if not hasattr(self.agent, 'memory') or not hasattr(self.agent.memory, 'steps'):
             return []
+
+        # Generate formatted conversation text using smolagents utilities
+        # This is done FIRST while agent memory is still intact
+        formatted_conversation = None
+        try:
+            messages = self.agent.write_memory_to_messages()
+            messages = get_clean_message_list(messages, role_conversions=tool_role_conversions,
+                                              flatten_messages_as_text=True)
+            formatted_conversation = self.agent.model.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False
+            )
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to generate formatted conversation: {e}")
+            formatted_conversation = None
 
         full_trace: Trace = []
         
@@ -136,7 +170,8 @@ class SmolAgentAdapter(BaseAgentAdapter):
                     "model_completion": model_completion_str.strip(),
                     "parsed_completion": parsed_completion,
                     "tool_output": tool_output_str.strip() if tool_output_str else None,
-                    "action_output": action_output_str
+                    "action_output": action_output_str,
+                    "formatted_conversation": formatted_conversation  # Add formatted text
                 }
                 full_trace.append(current_turn)
                 
