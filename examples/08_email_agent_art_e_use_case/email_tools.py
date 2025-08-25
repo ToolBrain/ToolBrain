@@ -26,6 +26,7 @@ DB_PATH = os.path.join(BASE_DIR, "..", "..", "data", "enron_emails.db")
 
 _db_connection = None
 
+
 def _get_db_connection() -> sqlite3.Connection:
     """
     Establishes and returns a thread-safe, read-only SQLite connection.
@@ -45,7 +46,9 @@ def _get_db_connection() -> sqlite3.Connection:
         )
     return _db_connection
 
+
 # --- Data Structures for Tool Outputs ---
+
 
 @dataclass
 class SearchResult:
@@ -53,14 +56,17 @@ class SearchResult:
     A dataclass to structure the results of an email search.
     Provides a clean, predictable output for the agent.
     """
+
     message_id: str
     snippet: str
+
 
 @dataclass
 class EmailDetails:
     """
     A dataclass to hold the full details of a retrieved email.
     """
+
     message_id: str
     date: str
     subject: str
@@ -70,7 +76,9 @@ class EmailDetails:
     bcc_addresses: List[str]
     body: str
 
+
 # --- Agent Tools ---
+
 
 @tool
 def search_emails(
@@ -113,7 +121,9 @@ def search_emails(
 
     # 1. Keywords (FTS5 search)
     # FTS5's default operator is AND. We escape quotes for safety.
-    fts_query = " ".join(f'"{k.replace("\"", "\"\"")}"' for k in keywords)
+    # fts_query = " ".join(f'"{k.replace("\"", "\"\"")}"' for k in keywords)
+    keyword_terms = [k.replace('"', '""') for k in keywords]
+    fts_query = " ".join(f'"{term}"' for term in keyword_terms)
     where_clauses.append("emails_fts MATCH ?")
     params.append(fts_query)
 
@@ -196,7 +206,7 @@ def read_email(message_id: str) -> Dict[str, Any]:
         # Query for the main email content
         cursor.execute(
             "SELECT date, subject, from_address, body FROM emails WHERE message_id = ?;",
-            (message_id,)
+            (message_id,),
         )
         email_row = cursor.fetchone()
 
@@ -209,15 +219,18 @@ def read_email(message_id: str) -> Dict[str, Any]:
         # Query for all recipients (to, cc, bcc)
         cursor.execute(
             "SELECT recipient_address, recipient_type FROM recipients WHERE email_id = (SELECT id FROM emails WHERE message_id = ?);",
-            (message_id,)
+            (message_id,),
         )
         recipient_rows = cursor.fetchall()
 
         to_addrs, cc_addrs, bcc_addrs = [], [], []
         for addr, type in recipient_rows:
-            if type == 'to': to_addrs.append(addr)
-            elif type == 'cc': cc_addrs.append(addr)
-            elif type == 'bcc': bcc_addrs.append(addr)
+            if type == "to":
+                to_addrs.append(addr)
+            elif type == "cc":
+                cc_addrs.append(addr)
+            elif type == "bcc":
+                bcc_addrs.append(addr)
 
         email_details = EmailDetails(
             message_id=message_id,
@@ -229,7 +242,7 @@ def read_email(message_id: str) -> Dict[str, Any]:
             bcc_addresses=bcc_addrs,
             body=body,
         )
-        
+
         logging.info(f"Successfully read email with message_id '{message_id}'.")
         return asdict(email_details)
 
