@@ -26,6 +26,7 @@ from peft import PeftModel
 from . import config
 from . import email_tools
 from smolagents import CodeAgent, TransformersModel
+from toolbrain.adapters import SmolAgentAdapter
 
 try:
     import litellem
@@ -130,11 +131,14 @@ def main(args):
     test_data = load_test_dataset()
     agent = load_trained_agent(args.model_dir)
 
+    adapter = SmolAgentAdapter(agent=agent, config={})
+    logging.info("Created adapter to run the agent for evaluation.")
+
     # 2. Run agent on all test questions
     evaluation_results = []
     for item in tqdm(test_data, desc="Running evaluation"):
         # The adapter's run method returns the trace
-        trace, _, _ = agent.adapter.run(item["prompt"])
+        trace, _, _ = adapter.run(item["prompt"])
         
         # Find the agent's final answer from the trace
         agent_answer = "I don't know" # Default if no answer is found
