@@ -54,9 +54,18 @@ def load_test_dataset():
     test_dataset = split_dataset['test']
     logging.info(f"Using the consistent test split with {len(test_dataset)} samples for evaluation.")
 
+    # Optional: Override for quick development runs
+    if config.MAX_TEST_SAMPLES is not None and config.MAX_TEST_SAMPLES < len(
+        test_dataset
+    ):
+        test_dataset = test_dataset.select(range(config.MAX_TEST_SAMPLES))
+        logging.warning(
+            f"OVERRIDE: Limiting testing to the first {config.MAX_TEST_SAMPLES} samples for development."
+        )
+
     # Format data similarly to the training script
     formatted_data = []
-    for item in dataset:
+    for item in test_dataset:
         prompt = f"""You are an email search agent.
 User's email address is {item['inbox_address']}
 Today's date is {item['query_date']}
@@ -78,17 +87,20 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
     # 1. Load the base model first
     base_model = TransformersModel(model_id=config.BASE_MODEL_ID)
 
-    # 2. Apply the LoRA adapters on top of the base model
-    # This merges the fine-tuned weights with the base model weights
-    peft_model = PeftModel.from_pretrained(base_model.model, model_dir)
-    
-    # Update the model in our wrapper
-    base_model.model = peft_model
-    
+    if model_dir:
+        # 2. Apply the LoRA adapters on top of the base model
+        # This merges the fine-tuned weights with the base model weights
+        peft_model = PeftModel.from_pretrained(base_model.model, model_dir)
+        
+        # Update the model in our wrapper
+        base_model.model = peft_model
+        
     # 3. Create the agent instance with the tuned model
     agent = CodeAgent(
         tools=[email_tools.search_emails, email_tools.read_email],
-        model=base_model
+        model=base_model,
+        max_steps=1,
+        planning_interval=None,
     )
     logging.info("Agent loaded successfully.")
     return agent
@@ -196,7 +208,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_dir",
         type=str,
-        required=True,
+        required=False,
+        default=None,
         help="The directory where the fine-tuned model (LoRA adapters) is saved."
     )
 
