@@ -10,3 +10,5 @@ peft
 litellm
 google-generativeai
 bitsandbytes
+unsloth
+gradio

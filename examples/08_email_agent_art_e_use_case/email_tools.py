@@ -17,6 +17,8 @@ from dataclasses import dataclass, asdict
 
 from smolagents import tool
 
+from . import config
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -215,6 +217,15 @@ def read_email(message_id: str) -> Dict[str, Any]:
             return {"error": f"Email with message_id '{message_id}' not found."}
 
         date, subject, from_addr, body = email_row
+
+        # Check if the limit is set in the config and if the body exceeds it.
+        if config.MAX_TOOL_OUTPUT_CHARS and len(body) > config.MAX_TOOL_OUTPUT_CHARS:
+            logging.warning(
+                f"Truncating long email body for message_id '{message_id}'. "
+                f"Original length: {len(body)}, Limit: {config.MAX_TOOL_OUTPUT_CHARS}."
+            )
+            # Truncate the string and add a clear indicator for the agent.
+            body = body[:config.MAX_TOOL_OUTPUT_CHARS] + "\n... [Content truncated due to length limit]"
 
         # Query for all recipients (to, cc, bcc)
         cursor.execute(

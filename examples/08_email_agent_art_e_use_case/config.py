@@ -156,3 +156,9 @@ Here are the rules you should always follow to solve your task:
 10. Don't give up! You're in charge of solving the task, not providing directions to solve it.
 
 Now Begin!'''
+# --- 4. Tool Output Configuration ---
+# To prevent Out Of Memory (OOM) errors caused by very long email bodies,
+# we can set a character limit for the tool output.
+# The `read_email` tool will truncate the email body if it exceeds this limit.
+# Set to None for no limit. A value around 4000-8000 is recommended for A100 GPUs.
+MAX_TOOL_OUTPUT_CHARS = 4096

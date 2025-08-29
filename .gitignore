@@ -80,3 +80,7 @@ Thumbs.db
 
 # Windows
 *.stackdump 
+
+log/
+logs/
+segments/

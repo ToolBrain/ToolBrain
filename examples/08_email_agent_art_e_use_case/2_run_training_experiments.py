@@ -34,6 +34,7 @@ from . import email_tools
 
 from toolbrain import Brain
 from toolbrain import rewards as core_rewards
+from toolbrain.models import UnslothModel 
 from smolagents import CodeAgent, TransformersModel
 from transformers import BitsAndBytesConfig
 import torch
@@ -44,6 +45,37 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s"
 )
 
+# This prompt acts as a "manual" for the agent.
+SYSTEM_PROMPT_TEMPLATE = """You are a highly capable email search agent. Your goal is to answer the user's question by searching their email inbox.
+
+**User Context:**
+- User's email address: {inbox_address}
+- Today's date: {query_date}
+
+**Available Tools:**
+You have two tools to help you:
+1. `search_emails(keywords: List[str], ...)`: Searches for emails. It returns a LIST of search results. Each result is a DICTIONARY containing a 'message_id' and a 'snippet'.
+2. `read_email(message_id: str)`: Reads the full content of a single email using its 'message_id'.
+
+**CRITICAL WORKFLOW:**
+1.  Start by using `search_emails` with relevant keywords from the user's question.
+2.  Examine the `snippet` from the search results to see which email is most promising.
+3.  **You MUST extract the 'message_id' string from the chosen search result dictionary.**
+4.  Use this `message_id` string as the input for the `read_email` tool.
+5.  After reading the email, analyze its content to find the final answer.
+6.  When you have the answer, state it clearly using "Final Answer:".
+
+**Example:**
+search_result = search_emails(keywords=['Shari', 'Portland'])
+# search_result might look like: [{'message_id': '<123@...>', 'snippet': '...move to Portland...'}]
+message_id_to_read = search_result[0]['message_id']
+email_content = read_email(message_id=message_id_to_read)
+# ... analyze email_content ...
+# Final Answer: The move is targeted for the end of February.
+
+Now, begin.
+User question: {question}
+"""
 
 def load_and_prepare_dataset():
     """
@@ -83,12 +115,11 @@ def load_and_prepare_dataset():
 
     formatted_data = []
     for item in train_dataset:
-        prompt = f"""You are an email search agent.
-User's email address is {item['inbox_address']}
-Today's date is {item['query_date']}
-
-User question: {item['question']}
-"""
+        prompt = SYSTEM_PROMPT_TEMPLATE.format(
+            inbox_address=item['inbox_address'],
+            query_date=item['query_date'],
+            question=item['question']
+        )
         formatted_data.append(
             {
                 "query": prompt,
@@ -97,7 +128,7 @@ User question: {item['question']}
             }
         )
 
-    logging.info(f"Dataset prepared with {len(formatted_data)} samples.")
+    logging.info(f"Dataset prepared with {len(formatted_data)} samples using the new detailed prompt.")
     return formatted_data
 
 
@@ -114,10 +145,11 @@ def initialize_agent():
         bnb_4bit_compute_dtype=torch.bfloat16,
         bnb_4bit_quant_storage=torch.bfloat16,
     )
-    trainable_model = TransformersModel(
+    trainable_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
         model_kwargs={"quantization_config": nf4_config, 'attn_implementation': "flash_attention_2", },
         max_new_tokens=512,
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + 2048
     )
 
     logging.info("Initializing CodeAgent with email tools...")
