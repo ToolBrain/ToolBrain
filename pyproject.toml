@@ -30,7 +30,9 @@ dependencies = [
     "peft>=0.17.0",
     "litellm",
     "google-generativeai",
-    "bitsandbytes"
+    "bitsandbytes",
+    "unsloth",
+    "gradio",
 ]
 
 [project.optional-dependencies]

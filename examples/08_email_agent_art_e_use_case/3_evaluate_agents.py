@@ -27,6 +27,7 @@ from . import config
 from . import email_tools
 from smolagents import CodeAgent, TransformersModel
 from toolbrain.adapters import SmolAgentAdapter
+from toolbrain.models import UnslothModel 
 
 try:
     import litellem
@@ -73,10 +74,17 @@ User question: {item['question']}
 
 
 def load_trained_agent(model_dir: str) -> CodeAgent:
-    """Loads a fine-tuned agent from a specified directory."""
-    logging.info(f"Loading fine-tuned agent from: {model_dir}")
-    
-    base_model = TransformersModel(model_id=config.BASE_MODEL_ID)
+    """
+    Loads a fine-tuned agent from a specified directory, ensuring that Unsloth
+    optimizations are applied for inference, consistent with training.
+    """
+    logging.info(f"Loading fine-tuned agent from: {model_dir} using Unsloth.")
+
+    base_model = UnslothModel(
+        model_id=config.BASE_MODEL_ID,
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + 2048
+    )
+
     peft_model = PeftModel.from_pretrained(base_model.model, model_dir)
     base_model.model = peft_model
     
@@ -84,7 +92,7 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
         tools=[email_tools.search_emails, email_tools.read_email],
         model=base_model
     )
-    logging.info("Agent loaded successfully.")
+    logging.info("✅ Agent loaded successfully with Unsloth optimizations.")
     return agent
 
 

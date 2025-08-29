@@ -17,6 +17,8 @@ import re
 
 from .core_types import Trace, Turn, ParsedCompletion, ChatSegment
 
+import logging
+
 
 class BaseAgentAdapter(ABC):
     """Abstract base class for agent adapters."""
@@ -87,14 +89,12 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 # Create a copy to avoid reference issues
                 raw_memory_steps = list(self.agent.memory.steps)
 
-            print(f"✅ Agent run completed. Extracted a trace with {len(structured_trace)} turns, "
+            logging.info(f"✅ Agent run completed. Extracted a trace with {len(structured_trace)} turns, "
                   f"and {len(raw_memory_steps)} raw memory steps.")
             return structured_trace, rl_input, raw_memory_steps
 
         except Exception as e:
-            print(f"❌ Error during agent.run() or trace extraction: {e}")
-            import traceback
-            traceback.print_exc()
+            logging.error(f"❌ An exception occurred during an agent run: {e}", exc_info=True)
             
             error_turn: Turn = {
                 "prompt_for_model": query,
@@ -104,6 +104,12 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 "action_output": None,
                 "formatted_conversation": None
             }
+        
+            logging.warning(
+                "Due to the error above, this agent run is considered FAILED. "
+                "Returning rl_input=None. This run will be excluded from the training batch."
+            )
+            
             return [error_turn], None, []
 
     def _extract_trace_from_memory(self) -> Trace:

@@ -33,6 +33,7 @@ from . import email_tools
 
 from toolbrain import Brain
 from toolbrain import rewards as core_rewards
+from toolbrain.models import UnslothModel 
 from smolagents import CodeAgent, TransformersModel
 from transformers import BitsAndBytesConfig
 
@@ -138,9 +139,9 @@ def initialize_agent():
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
     )
-    trainable_model = TransformersModel(
+    trainable_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
-        model_kwargs={"quantization_config": nf4_config},
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + 2048
     )
 
     logging.info("Initializing CodeAgent with email tools...")
