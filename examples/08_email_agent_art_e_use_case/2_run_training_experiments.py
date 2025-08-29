@@ -64,7 +64,7 @@ You have two tools to help you:
 
 **Example:**
 search_result = search_emails(keywords=['Shari', 'Portland'])
-# search_result might look like: [{'message_id': '<123@...>', 'snippet': '...move to Portland...'}]
+# search_result might look like: [{{'message_id': '<123@...>', 'snippet': '...move to Portland...'}}]  
 message_id_to_read = search_result[0]['message_id']
 email_content = read_email(message_id=message_id_to_read)
 # ... analyze email_content ...
@@ -141,7 +141,8 @@ def initialize_agent():
     )
     trainable_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
-        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + 2048
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
+        max_new_tokens=config.MAX_NEW_TOKENS
     )
 
     logging.info("Initializing CodeAgent with email tools...")

@@ -33,6 +33,7 @@ dependencies = [
     "bitsandbytes",
     "unsloth",
     "gradio",
+    "datasets>=3.4.1,<4.0.0",
 ]
 
 [project.optional-dependencies]
