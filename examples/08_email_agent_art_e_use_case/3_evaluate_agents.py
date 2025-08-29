@@ -28,10 +28,11 @@ from . import email_tools
 from smolagents import CodeAgent, TransformersModel
 from toolbrain.adapters import SmolAgentAdapter
 
-try:
-    import litellem
-except ImportError:
-    litellm = None
+# try:
+#     import litellm
+# except ImportError:
+#     litellm = None
+import litellm
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s")
@@ -89,20 +90,24 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
     base_model = TransformersModel(model_id=config.BASE_MODEL_ID)
 
     if model_dir:
-        # 2. Apply the LoRA adapters on top of the base model
-        # This merges the fine-tuned weights with the base model weights
-        peft_model = PeftModel.from_pretrained(base_model.model, model_dir)
-        
-        # Update the model in our wrapper
-        base_model.model = peft_model
-        
+        try:
+            base_model = TransformersModel(model_id=model_dir)
+        except Exception as e:
+            # 2. Apply the LoRA adapters on top of the base model
+            # This merges the fine-tuned weights with the base model weights
+            peft_model = PeftModel.from_pretrained(base_model.model, model_dir)
+
+            # Update the model in our wrapper
+            base_model.model = peft_model
+    system_prompt = config.NEW_SYSTEM_PROMPT
     # 3. Create the agent instance with the tuned model
     agent = CodeAgent(
         tools=[email_tools.search_emails, email_tools.read_email],
         model=base_model,
-        max_steps=1,
+        max_steps=10,
         planning_interval=None,
     )
+    agent.prompt_templates["system_prompt"] = system_prompt
     logging.info("Agent loaded successfully.")
     return agent
 
@@ -112,8 +117,8 @@ def judge_correctness(agent_answer: str, gold_answer: str, original_question: st
     Uses an LLM to judge if the agent's answer is correct.
     Returns 'CORRECT', 'INCORRECT', or 'NO_ANSWER'.
     """
-    if litellm is None:
-        raise ImportError("litellm is required for evaluation. Please install it.")
+    # if litellm is None:
+    #     raise ImportError("litellm is required for evaluation. Please install it.")
 
     # If agent refuses to answer, it's not a hallucination, just an inability to answer.
     if "don't know" in agent_answer.lower() or "unable to find" in agent_answer.lower():

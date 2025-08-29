@@ -21,6 +21,7 @@ How to run from the command line (from the project root TOOLBRAIN/):
    python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments \
        --algorithm GRPO --reward_function toolbrain_judge --output_dir ./models/art_e_grpo_toolbrain_judge
 """
+#CUDA_VISIBLE_DEVICES="2" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments        --algorithm GRPO --reward_function toolbrain_judge --output_dir ./models/art_e_grpo_toolbrain_judge_qwen14b_qlora; CUDA_VISIBLE_DEVICES="3" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments --algorithm DPO --reward_function art_judge --output_dir ./models/art_e_dpo_art_judge; CUDA_VISIBLE_DEVICES="2" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments --algorithm GRPO --reward_function f1 --output_dir ./models/art_e_grpo_f1
 
 import argparse
 import os
@@ -35,6 +36,8 @@ from toolbrain import Brain
 from toolbrain import rewards as core_rewards
 from smolagents import CodeAgent, TransformersModel
 from transformers import BitsAndBytesConfig
+import torch
+
 
 # Setup logging
 logging.basicConfig(
@@ -106,19 +109,27 @@ def initialize_agent():
     # trainable_model = TransformersModel(model_id=config.BASE_MODEL_ID)
     nf4_config = BitsAndBytesConfig(
         load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_quant_storage=torch.bfloat16,
     )
     trainable_model = TransformersModel(
         model_id=config.BASE_MODEL_ID,
-        model_kwargs={"quantization_config": nf4_config},
+        model_kwargs={"quantization_config": nf4_config, 'attn_implementation': "flash_attention_2", },
+        max_new_tokens=512,
     )
 
     logging.info("Initializing CodeAgent with email tools...")
+    system_prompt = config.NEW_SYSTEM_PROMPT
+
     agent = CodeAgent(
         tools=[email_tools.search_emails, email_tools.read_email],
         model=trainable_model,
         max_steps=10,
+        planning_interval=None,
     )
+    agent.prompt_templates["system_prompt"] = system_prompt
     return agent
 
 

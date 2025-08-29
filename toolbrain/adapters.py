@@ -10,10 +10,13 @@ from smolagents.models import get_clean_message_list, tool_role_conversions
 from typing import Optional, List, Any
 
 from peft import get_peft_model
+from peft import prepare_model_for_kbit_training
+
 from smolagents import CodeAgent, TransformersModel, ChatMessage, MessageRole
 import io
 import contextlib
 import re
+import torch
 
 from .core_types import Trace, Turn, ParsedCompletion, ChatSegment
 
@@ -75,7 +78,8 @@ class SmolAgentAdapter(BaseAgentAdapter):
         print(f"🚀 Adapter is calling agent.run() for query: '{query[:50]}...'")
         
         try:
-            self.agent.run(query, reset=True)
+            with torch.inference_mode():
+                self.agent.run(query, reset=True)
             
             # Extract structured trace and RL input as before
             structured_trace = self._extract_trace_from_memory()
@@ -306,7 +310,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
     def _set_lora_finetuning(self):
         lora_config = self.config.get("lora_config", None)
         if lora_config:
-            hf_model = get_peft_model(self.agent.model.model, lora_config)
+            hf_model = get_peft_model(prepare_model_for_kbit_training(self.agent.model.model), lora_config)
             self.agent.model.model = hf_model
             print(f"✅ LoRA configuration is successful!")
             total_params = sum(p.numel() for p in self.agent.model.model.parameters())

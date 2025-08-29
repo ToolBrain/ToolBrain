@@ -10,7 +10,6 @@ from .losses import grpo_loss
 from ...core_types import ChatSegment
 import bitsandbytes as bnb
 
-
 def validate_config(config: dict) -> None:
     """
     Validate that the config dict contains all the required keys.
@@ -40,6 +39,8 @@ class GRPOAlgorithm:
     ) -> None:
         self.device = next(initial_policy.llm.parameters()).device
 
+        # self.accelerator = Accelerator()
+        # self.device = self.accelerator.device
         self.policy = initial_policy
         self.policy = self.policy.to(self.device)
 
@@ -95,6 +96,14 @@ class GRPOAlgorithm:
         assert len(segments) == len(
             rewards
         ), f"Length of traces and rewards must be the same. Received {len(traces)} traces, {len(rewards)} rewards."
+
+        # save segments to a file named based on current timestamp
+        import time
+        import json
+        timestamp = int(time.time())
+        with open(f'segments/{timestamp}.json', 'w') as f:
+            json.dump(segments, f, indent=4, ensure_ascii=False)
+        print(f"Segments saved to segments/{timestamp}.json")
 
         batch = build_inputs(
             segments=segments, rewards=rewards, tokenizer=pi_theta.tokenizer
