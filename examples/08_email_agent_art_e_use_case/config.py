@@ -80,3 +80,10 @@ DPO_CONFIG = {
     "batch_size": 2,
     "lora_config": LORA_CONFIG,
 }
+
+# --- 4. Tool Output Configuration ---
+# To prevent Out Of Memory (OOM) errors caused by very long email bodies,
+# we can set a character limit for the tool output.
+# The `read_email` tool will truncate the email body if it exceeds this limit.
+# Set to None for no limit. A value around 4000-8000 is recommended for A100 GPUs.
+MAX_TOOL_OUTPUT_CHARS = 4096
