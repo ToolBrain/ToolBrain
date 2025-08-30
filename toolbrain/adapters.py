@@ -5,6 +5,12 @@ This module provides the Adapter pattern implementation to make different
 agent libraries compatible with ToolBrain's trace-based training system.
 """
 
+try:
+    from unsloth import FastLanguageModel
+    UNSLOTH_AVAILABLE = True
+except ImportError:
+    UNSLOTH_AVAILABLE = False
+
 from abc import ABC, abstractmethod
 from smolagents.models import get_clean_message_list, tool_role_conversions
 from typing import Optional, List, Any
@@ -312,8 +318,20 @@ class SmolAgentAdapter(BaseAgentAdapter):
     def _set_lora_finetuning(self):
         lora_config = self.config.get("lora_config", None)
         if lora_config:
-            hf_model = get_peft_model(self.agent.model.model, lora_config)
-            self.agent.model.model = hf_model
+            is_unsloth_model = UNSLOTH_AVAILABLE and hasattr(self.agent.model, 'model') and isinstance(self.agent.model.model, FastLanguageModel)
+            
+            if is_unsloth_model:
+                print("✅ Applying LoRA configuration using Unsloth's optimized method...")
+                self.agent.model.model = FastLanguageModel.get_peft_model(
+                    self.agent.model.model,
+                    lora_config,
+                    use_gradient_checkpointing = True 
+                )
+            else:
+                print("Applying LoRA configuration using standard PEFT...")
+                hf_model = get_peft_model(self.agent.model.model, lora_config)
+                self.agent.model.model = hf_model
+            
             print(f"✅ LoRA configuration is successful!")
             total_params = sum(p.numel() for p in self.agent.model.model.parameters())
             trainable_params = sum(p.numel() for p in self.agent.model.model.parameters() if p.requires_grad)
