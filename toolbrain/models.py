@@ -1,9 +1,10 @@
+import unsloth
+from unsloth import FastLanguageModel
 import logging
 from typing import Optional, Dict, Any
 
 from smolagents import TransformersModel
 
-from unsloth import FastLanguageModel
 
 
 class UnslothModel(TransformersModel):

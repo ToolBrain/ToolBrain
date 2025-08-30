@@ -22,6 +22,8 @@ How to run from the command line (from the project root TOOLBRAIN/):
        --algorithm GRPO --reward_function toolbrain_judge --output_dir ./models/art_e_grpo_toolbrain_judge
 """
 #CUDA_VISIBLE_DEVICES="2" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments        --algorithm GRPO --reward_function toolbrain_judge --output_dir ./models/art_e_grpo_toolbrain_judge_qwen14b_qlora; CUDA_VISIBLE_DEVICES="3" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments --algorithm DPO --reward_function art_judge --output_dir ./models/art_e_dpo_art_judge; CUDA_VISIBLE_DEVICES="2" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments --algorithm GRPO --reward_function f1 --output_dir ./models/art_e_grpo_f1
+import unsloth
+from toolbrain.models import UnslothModel 
 
 import argparse
 import os
@@ -34,7 +36,6 @@ from . import email_tools
 
 from toolbrain import Brain
 from toolbrain import rewards as core_rewards
-from toolbrain.models import UnslothModel 
 from smolagents import CodeAgent, TransformersModel
 from transformers import BitsAndBytesConfig
 import torch
@@ -115,11 +116,16 @@ def load_and_prepare_dataset():
 
     formatted_data = []
     for item in train_dataset:
-        prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            inbox_address=item['inbox_address'],
-            query_date=item['query_date'],
-            question=item['question']
-        )
+        # prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        #     inbox_address=item['inbox_address'],
+        #     query_date=item['query_date'],
+        #     question=item['question']
+        # )
+        prompt = f"""You are an email search agent.
+User's email address is {item['inbox_address']}
+Today's date is {item['query_date']}
+
+User question: {item['question']}"""
         formatted_data.append(
             {
                 "query": prompt,

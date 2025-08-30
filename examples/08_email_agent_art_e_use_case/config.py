@@ -17,7 +17,7 @@ from peft import LoraConfig
 # These settings are shared across all experiments in this use case.
 
 # Define the base model to be fine-tuned.
-BASE_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
+BASE_MODEL_ID = "Qwen/Qwen2.5-14B-Instruct"
 
 # Define the model to be used as the LLM-as-a-Judge.
 JUDGE_MODEL_ID = "gemini/gemini-2.5-flash-lite"
