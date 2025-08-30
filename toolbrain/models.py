@@ -3,7 +3,7 @@ from unsloth import FastLanguageModel
 import logging
 from typing import Optional, Dict, Any
 
-from smolagents import TransformersModel
+from smolagents import Model, TransformersModel
 from transformers import TextIteratorStreamer
 
 
