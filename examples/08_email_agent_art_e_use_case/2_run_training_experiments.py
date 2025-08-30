@@ -153,9 +153,10 @@ def initialize_agent():
     )
     trainable_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
-        model_kwargs={"quantization_config": nf4_config, 'attn_implementation': "flash_attention_2", },
-        max_new_tokens=512,
-        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + 2048
+        # model_kwargs={"quantization_config": nf4_config, 'attn_implementation': "flash_attention_2", },
+        model_kwargs={'attn_implementation': "flash_attention_2", },
+        max_new_tokens=config.MAX_NEW_TOKENS,
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS
     )
 
     logging.info("Initializing CodeAgent with email tools...")
