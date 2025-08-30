@@ -68,7 +68,7 @@ You have two tools to help you:
 
 **Example:**
 search_result = search_emails(keywords=['Shari', 'Portland'])
-# search_result might look like: [{'message_id': '<123@...>', 'snippet': '...move to Portland...'}]
+# search_result might look like: [{{'message_id': '<123@...>', 'snippet': '...move to Portland...'}}]  
 message_id_to_read = search_result[0]['message_id']
 email_content = read_email(message_id=message_id_to_read)
 # ... analyze email_content ...

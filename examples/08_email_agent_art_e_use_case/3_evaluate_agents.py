@@ -91,7 +91,8 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
 
     base_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
-        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + 2048
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
+        max_new_tokens=config.MAX_NEW_TOKENS
     )
 
     peft_model = PeftModel.from_pretrained(base_model.model, model_dir)

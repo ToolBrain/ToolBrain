@@ -162,3 +162,5 @@ Now Begin!'''
 # The `read_email` tool will truncate the email body if it exceeds this limit.
 # Set to None for no limit. A value around 4000-8000 is recommended for A100 GPUs.
 MAX_TOOL_OUTPUT_CHARS = 4096
+
+MAX_NEW_TOKENS = 2048
