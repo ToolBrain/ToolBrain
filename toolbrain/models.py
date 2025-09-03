@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any
 
 from smolagents import Model, TransformersModel
 from transformers import TextIteratorStreamer
+from smolagents import ChatMessage, Tool
+import torch
 
 
 class UnslothModel(TransformersModel):
@@ -12,13 +14,14 @@ class UnslothModel(TransformersModel):
     An extension of the smolagents.TransformersModel that uses the Unsloth library
     for significantly faster training and lower memory usage.
     """
+
     def __init__(
         self,
         model_id: str,
         model_kwargs: Optional[Dict[str, Any]] = None,
         max_seq_length: int = 4096,
         max_new_tokens: int = 4096,
-        **kwargs: Any
+        **kwargs: Any,
     ):
         """
         Initializes the model using Unsloth's FastLanguageModel.
@@ -29,34 +32,39 @@ class UnslothModel(TransformersModel):
             max_seq_length: The maximum sequence length for the model.
         """
         logging.info("Initializing grandparent 'Model' class...")
-        Model.__init__(self, 
-            flatten_messages_as_text=True, 
-            model_id=model_id, 
-            max_new_tokens=max_new_tokens, 
-            **kwargs
+        Model.__init__(
+            self,
+            flatten_messages_as_text=True,
+            model_id=model_id,
+            max_new_tokens=max_new_tokens,
+            **kwargs,
         )
-        
-        logging.info(f"Initializing '{model_id}' with Unsloth for optimized performance...")
-        
+
+        logging.info(
+            f"Initializing '{model_id}' with Unsloth for optimized performance..."
+        )
+
         model_kwargs = model_kwargs or {}
-        
+
         # Load the model and tokenizer using Unsloth's optimized method
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_id,
             max_seq_length=max_seq_length,
-            dtype=None,     
-            load_in_4bit=True, 
+            dtype=torch.float16,
+            load_in_4bit=True,
             **model_kwargs,
         )
-        
+
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             logging.info("Set tokenizer's pad_token to its eos_token.")
 
-        self._is_vlm = False 
+        self._is_vlm = False
         self.model_kwargs = model_kwargs
-        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        
+        self.streamer = TextIteratorStreamer(
+            self.tokenizer, skip_prompt=True, skip_special_tokens=True
+        )
+
         logging.info("✅ Unsloth model initialized successfully and is ready to use.")
 
     def _prepare_completion_args(
@@ -97,20 +105,23 @@ class UnslothModel(TransformersModel):
             return_dict=True,
         )
         prompt_tensor = prompt_tensor.to(self.model.device)
+        # import pdb; pdb.set_trace()
         if hasattr(prompt_tensor, "input_ids"):
             prompt_tensor = prompt_tensor["input_ids"]
 
         # This is the single most important change. We ensure the input tensor's
-        # dtype matches the model's expected dtype before it's used.
-        if hasattr(self.model, "dtype") and prompt_tensor.dtype != self.model.dtype:
-            prompt_tensor = prompt_tensor.to(self.model.dtype)
+        # # dtype matches the model's expected dtype before it's used.
+        # if hasattr(self.model, "dtype") and prompt_tensor.dtype != self.model.dtype:
+        #     prompt_tensor = prompt_tensor.to(self.model.dtype)
 
         model_tokenizer = self.tokenizer
         stopping_criteria = (
-            self.make_stopping_criteria(stop_sequences, tokenizer=model_tokenizer) if stop_sequences else None
+            self.make_stopping_criteria(stop_sequences, tokenizer=model_tokenizer)
+            if stop_sequences
+            else None
         )
         completion_kwargs["max_new_tokens"] = max_new_tokens
-        
+
         # The final dictionary is returned, now with a dtype-corrected prompt_tensor
         return dict(
             inputs=prompt_tensor,

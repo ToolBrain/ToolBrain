@@ -17,7 +17,12 @@ from dataclasses import dataclass, asdict
 
 from smolagents import tool
 
-from . import config
+# from . import config
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.insert(0, os.path.dirname(__file__))
+import config
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

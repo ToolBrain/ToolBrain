@@ -42,10 +42,10 @@ class GRPOAlgorithm:
         # self.accelerator = Accelerator()
         # self.device = self.accelerator.device
         self.policy = initial_policy
-        self.policy = self.policy.to(self.device)
+        # self.policy = self.policy.to(self.device)
 
         self.pi_ref = ref_policy if ref_policy else copy.deepcopy(initial_policy)
-        self.pi_ref = self.pi_ref.to(self.device)
+        # self.pi_ref = self.pi_ref.to(self.device)
 
         validate_config(config)
         self.config = config

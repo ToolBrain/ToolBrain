@@ -17,7 +17,7 @@ from peft import LoraConfig
 # These settings are shared across all experiments in this use case.
 
 # Define the base model to be fine-tuned.
-BASE_MODEL_ID = "Qwen/Qwen2.5-14B-Instruct"
+BASE_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 
 # Define the model to be used as the LLM-as-a-Judge.
 JUDGE_MODEL_ID = "gemini/gemini-2.5-flash-lite"
@@ -142,7 +142,7 @@ def {{ agent.name }}("Your query goes here.") -> str:
 You can use imports in your code, but only from the following list of modules: {{authorized_imports}}
 '''
 
-temp = '''
+temp = """
 Here are the rules you should always follow to solve your task:
 1. Always provide a 'Thought:' sequence, and a 'Code:\n```py' sequence ending with '```<end_code>' sequence, else you will fail.
 2. Use only variables that you have defined!
@@ -155,12 +155,12 @@ Here are the rules you should always follow to solve your task:
 9. The state persists between code executions: so if in one step you've created variables or imported modules, these will all persist.
 10. Don't give up! You're in charge of solving the task, not providing directions to solve it.
 
-Now Begin!'''
+Now Begin!"""
 # --- 4. Tool Output Configuration ---
 # To prevent Out Of Memory (OOM) errors caused by very long email bodies,
 # we can set a character limit for the tool output.
 # The `read_email` tool will truncate the email body if it exceeds this limit.
 # Set to None for no limit. A value around 4000-8000 is recommended for A100 GPUs.
-MAX_TOOL_OUTPUT_CHARS = 4096
+MAX_TOOL_OUTPUT_CHARS = 2048
 
-MAX_NEW_TOKENS = 2048
+MAX_NEW_TOKENS = 512

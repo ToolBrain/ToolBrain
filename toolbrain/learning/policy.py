@@ -5,9 +5,11 @@ import copy
 
 
 def compute_per_token_logps(
-    logits: torch.Tensor,          # (B, L-1, V)
-    input_ids: torch.Tensor,       # (B, L-1)
-    chunk_len: int | None = None,  # if set, compute along L in chunks of C tokens to reduce peak memory
+    logits: torch.Tensor,  # (B, L-1, V)
+    input_ids: torch.Tensor,  # (B, L-1)
+    chunk_len: (
+        int | None
+    ) = None,  # if set, compute along L in chunks of C tokens to reduce peak memory
 ) -> torch.Tensor:
     """
     Return per-token log-probs aligned with targets.
@@ -18,7 +20,9 @@ def compute_per_token_logps(
     """
     if chunk_len is None:
         lp = logits.log_softmax(dim=-1)  # (B, L-1, V)
-        return lp.gather(dim=-1, index=input_ids.long().unsqueeze(-1)).squeeze(-1)  # (B, L-1)
+        return lp.gather(dim=-1, index=input_ids.long().unsqueeze(-1)).squeeze(
+            -1
+        )  # (B, L-1)
 
     # Chunked path along sequence length
     chunk_outputs: list[torch.Tensor] = []
@@ -28,14 +32,16 @@ def compute_per_token_logps(
         lp = logits[:, start_idx:end_idx, :].log_softmax(dim=-1)  # (B, C, V)
         chunk_outputs.append(
             lp.gather(
-                dim=-1,
-                index=input_ids[:, start_idx:end_idx].long().unsqueeze(-1)).squeeze(-1)
+                dim=-1, index=input_ids[:, start_idx:end_idx].long().unsqueeze(-1)
+            ).squeeze(-1)
         )  # (B, C)
     return torch.cat(chunk_outputs, dim=1)  # (B, L-1)
 
 
 class Policy(nn.Module):
-    def __init__(self, llm: AutoModelForCausalLM, tokenizer: PreTrainedTokenizerBase) -> None:
+    def __init__(
+        self, llm: AutoModelForCausalLM, tokenizer: PreTrainedTokenizerBase
+    ) -> None:
         super().__init__()
         self.llm = llm
         self.tokenizer = tokenizer
@@ -46,15 +52,19 @@ class Policy(nn.Module):
         self.llm.to(device)
         return self
 
-    def get_per_token_logps(self,
-                            input_ids: torch.Tensor,
-                            attention_mask: torch.Tensor,
-                            chunk_len: int | None = None) -> torch.Tensor:
+    def get_per_token_logps(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        chunk_len: int | None = None,
+    ) -> torch.Tensor:
         """Return per-token log-probs aligned for causal LM loss
         (predict token t from context up to t-1).
         Output shape: (B, L-1).
         """
-        logits = self.llm(input_ids=input_ids, attention_mask=attention_mask).logits  # shape: (B, L, V)
+        logits = self.llm(
+            input_ids=input_ids, attention_mask=attention_mask
+        ).logits  # shape: (B, L, V)
 
         # Exclude the last logit because it has no corresponding target token
         # (there is no "next token" after the last one)
@@ -63,7 +73,9 @@ class Policy(nn.Module):
         # the context before it (no preceding token)
         input_ids = input_ids[:, 1:]  # shape: (B, L-1)
 
-        per_token_logps = compute_per_token_logps(logits, input_ids, chunk_len=chunk_len)  # shape: (B, L-1)
+        per_token_logps = compute_per_token_logps(
+            logits, input_ids, chunk_len=chunk_len
+        )  # shape: (B, L-1)
         return per_token_logps
 
     def copy(self) -> "Policy":

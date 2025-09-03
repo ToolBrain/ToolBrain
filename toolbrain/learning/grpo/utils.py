@@ -33,6 +33,7 @@ class GRPOBatch:
             advantages=self.advantages[:, 1:],
         )
 
+
 # --- Robust text casting for tokenizer.encode inputs -------------------------
 def _to_text(x) -> str:
     """Convert arbitrary values to a safe string for tokenization.
@@ -52,6 +53,7 @@ def _to_text(x) -> str:
         except Exception:
             return str(x)
     return str(x)
+
 
 def compute_advantages(rewards: torch.Tensor | List[float]) -> torch.Tensor:
     """
@@ -97,7 +99,7 @@ def build_inputs(
 
     # Normalize per-trace rewards across the batch (DeepSeekMath §4.1.2)
     normalized_rewards = compute_advantages(rewards)  # shape: (B,)
-    
+
     for idx, trace in enumerate(segments):
         seq_ids: List[int] = []
         seq_attn: List[int] = []
@@ -154,13 +156,13 @@ def build_inputs(
         input_ids=input_ids,
         attention_mask=attention_mask,
         completion_mask=completion_mask,
-        advantages=advantages
+        advantages=advantages,
     )
-
 
 
 if __name__ == "__main__":
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
     # Traces
     traces: List[List[ChatSegment]] = [
         [
@@ -198,7 +200,9 @@ if __name__ == "__main__":
     print(f"Rewards: {rewards}")
 
     # GRPOBatch
-    batch = build_inputs(segments=traces, rewards=rewards, tokenizer=policy_model.tokenizer)
+    batch = build_inputs(
+        segments=traces, rewards=rewards, tokenizer=policy_model.tokenizer
+    )
     input_ids = batch.input_ids
     attention_mask = batch.attention_mask
     completion_mask = batch.completion_mask
@@ -216,7 +220,9 @@ if __name__ == "__main__":
 
     # Log Probs
     log_probs = policy_model.get_per_token_logps(input_ids, attention_mask)  # (B, L-1)
-    log_probs_chunked = policy_model.get_per_token_logps(input_ids, attention_mask, chunk_len=128)  # (B, L-1)
+    log_probs_chunked = policy_model.get_per_token_logps(
+        input_ids, attention_mask, chunk_len=128
+    )  # (B, L-1)
     print("Log probabilities shape:", log_probs.shape)
     print("Log probabilities chunked shape:", log_probs_chunked.shape)
 
@@ -228,16 +234,23 @@ if __name__ == "__main__":
     advantages_loss = shifted_batch.advantages
 
     # Sanity checks
-    assert log_probs.shape == input_ids_loss.shape, f"log_probs {log_probs.shape} vs labels {input_ids_loss.shape}"
-    assert completion_mask_loss.shape == log_probs.shape, "completion_mask not aligned with shifted logits"
-    assert advantages_loss.shape == log_probs.shape, "advantages not aligned with shifted logits"
+    assert (
+        log_probs.shape == input_ids_loss.shape
+    ), f"log_probs {log_probs.shape} vs labels {input_ids_loss.shape}"
+    assert (
+        completion_mask_loss.shape == log_probs.shape
+    ), "completion_mask not aligned with shifted logits"
+    assert (
+        advantages_loss.shape == log_probs.shape
+    ), "advantages not aligned with shifted logits"
 
     print("Completion mask (row 0, shifted):", completion_mask_loss[0])
     print("#model tokens row0 (shifted):", int(completion_mask_loss[0].sum().item()))
     print("#total tokens row0 (shifted):", int(attention_mask_loss[0].sum().item()))
 
-
     policy_copy = policy_model.copy()
     assert policy_copy is not policy_model
     assert policy_copy.llm is not policy_model.llm
-    print("Policy copy test passed: policy_copy and policy_model are different objects, including their llm modules.")
+    print(
+        "Policy copy test passed: policy_copy and policy_model are different objects, including their llm modules."
+    )
