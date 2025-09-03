@@ -288,33 +288,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 
         return parts
 
-    def _format_messages_to_string(self, messages: List[ChatMessage]) -> str:
-        """
-        Converts a list of smolagents.ChatMessage objects into a single,
-        human-readable string, based on the actual class structure.
-        This is used to reconstruct the `prompt_for_model` for our Trace.
-        """
-        if not messages:
-            return ""
-        
-        full_text_parts = []
-        for msg in messages:
-            role = msg.role.name.upper() if hasattr(msg, 'role') and hasattr(msg.role, 'name') else 'UNKNOWN_ROLE'
-            
-            content_text = ""
-            if isinstance(msg.content, list):
-                text_parts = []
-                for item in msg.content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                content_text = " ".join(text_parts)
-            elif isinstance(msg.content, str):
-                content_text = msg.content
-            
-            full_text_parts.append(f"--- {role} ---\n{content_text}")
-            
-        return "\n".join(full_text_parts)
-
     def _set_lora_finetuning(self):
         lora_config = self.config.get("lora_config", None)
         if lora_config:
