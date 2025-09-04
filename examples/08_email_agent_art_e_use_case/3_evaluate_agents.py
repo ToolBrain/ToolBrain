@@ -18,6 +18,7 @@ python -m examples.08_email_agent_art_e_use_case.3_evaluate_agents \
 import argparse
 import logging
 import os
+import time
 from typing import List, Dict, Any
 from datasets import load_dataset
 from tqdm import tqdm
@@ -132,11 +133,8 @@ def classify_answer_with_llm(
     """
     Uses a powerful LLM to classify the agent's answer into one of three categories.
     """
-    # if litellm is None:
-    #     raise ImportError("litellm is required for evaluation. Please install it.")
 
-    try:
-        system_prompt = """You are a meticulous AI evaluator. Your task is to classify an agent's answer into one of three categories based on a ground truth answer.
+    system_prompt = """You are a meticulous AI evaluator. Your task is to classify an agent's answer into one of three categories based on a ground truth answer.
 The categories are:
 1. CORRECT: The agent's answer is factually and semantically equivalent to the ground truth.
 2. INCORRECT: The agent's answer provides factually wrong information. This is a hallucination.
@@ -144,15 +142,16 @@ The categories are:
 
 Respond with ONLY ONE WORD: CORRECT, INCORRECT, or NO_ANSWER."""
 
-        user_prompt = f"""Question: {original_question}
+    user_prompt = f"""Question: {original_question}
 Ground Truth Answer: {gold_answer}
 Agent's Answer: {agent_answer}"""
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
+    try:
         response = litellm.completion(
             model=config.JUDGE_MODEL_ID,
             messages=messages,
@@ -171,6 +170,9 @@ Agent's Answer: {agent_answer}"""
 
     except Exception as e:
         logging.error(f"Error calling evaluation judge: {e}")
+        logging.error(f"--- FAILED PROMPT ---")
+        logging.error(user_prompt)
+        logging.error(f"--- END OF FAILED PROMPT ---")
         return "INCORRECT"
 
 
@@ -217,6 +219,8 @@ def main(args):
             num_no_answer += 1
 
         total_turns += len(result["trace"])
+
+        time.sleep(2) # sleep for 2 seconds to avoid rate limiting
 
     total_questions = len(evaluation_results)
     total_attempted_answers = num_correct + num_incorrect
