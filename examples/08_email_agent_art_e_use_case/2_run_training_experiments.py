@@ -46,45 +46,15 @@ from toolbrain import rewards as core_rewards
 from smolagents import CodeAgent, TransformersModel
 from transformers import BitsAndBytesConfig
 import torch
+import json
+from .5_run_evaluation_art_style import run_evaluation as run_evaluation_art_style
+from .3_evaluate_agents import run_evaluation_toolbrain_style, load_validation_dataset_for_eval as load_validation_dataset
 
 
 # Setup logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s"
 )
-
-# This prompt acts as a "manual" for the agent.
-SYSTEM_PROMPT_TEMPLATE = """You are a highly capable email search agent. Your goal is to answer the user's question by searching their email inbox.
-
-**User Context:**
-- User's email address: {inbox_address}
-- Today's date: {query_date}
-
-**Available Tools:**
-You have two tools to help you:
-1. `search_emails(keywords: List[str], ...)`: Searches for emails. It returns a LIST of search results. Each result is a DICTIONARY containing a 'message_id' and a 'snippet'.
-2. `read_email(message_id: str)`: Reads the full content of a single email using its 'message_id'.
-
-**CRITICAL WORKFLOW:**
-1.  Start by using `search_emails` with relevant keywords from the user's question.
-2.  Examine the `snippet` from the search results to see which email is most promising.
-3.  **You MUST extract the 'message_id' string from the chosen search result dictionary.**
-4.  Use this `message_id` string as the input for the `read_email` tool.
-5.  After reading the email, analyze its content to find the final answer.
-6.  When you have the answer, state it clearly using "Final Answer:".
-
-**Example:**
-search_result = search_emails(keywords=['Shari', 'Portland'])
-# search_result might look like: [{{'message_id': '<123@...>', 'snippet': '...move to Portland...'}}]  
-message_id_to_read = search_result[0]['message_id']
-email_content = read_email(message_id=message_id_to_read)
-# ... analyze email_content ...
-# Final Answer: The move is targeted for the end of February.
-
-Now, begin.
-User question: {question}
-"""
-
 
 def load_and_prepare_dataset():
     """
@@ -124,23 +94,18 @@ def load_and_prepare_dataset():
 
     formatted_data = []
     for item in train_dataset:
-        # prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        #     inbox_address=item['inbox_address'],
-        #     query_date=item['query_date'],
-        #     question=item['question']
-        # )
-        prompt = f"""You are an email search agent.
-User's email address is {item['inbox_address']}
-Today's date is {item['query_date']}
-
-User question: {item['question']}"""
-        formatted_data.append(
-            {
-                "query": prompt,
-                "gold_answer": item["answer"],
-                "original_question": item["question"],
-            }
+        system_prompt = config.SYSTEM_PROMPT_TEMPLATE.format(
+            max_turns=config.MAX_AGENT_TURNS,
+            inbox_address=item['inbox_address'],
+            query_date=item['query_date']
         )
+        full_query = f"{system_prompt}\nUser question: {item['question']}"
+
+        formatted_data.append({
+            "query": full_query,
+            "gold_answer": item["answer"],
+            "original_question": item["question"],
+        })
 
     logging.info(
         f"Dataset prepared with {len(formatted_data)} samples using the new detailed prompt."
@@ -157,19 +122,16 @@ def initialize_agent():
     trainable_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
         max_new_tokens=config.MAX_NEW_TOKENS,
-        max_seq_length=(config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS) * 5,
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
     )
 
     logging.info("Initializing CodeAgent with email tools...")
-    system_prompt = config.NEW_SYSTEM_PROMPT
 
     agent = CodeAgent(
         tools=[email_tools.search_emails, email_tools.read_email],
         model=trainable_model,
-        max_steps=10,
-        planning_interval=None,
-    )
-    agent.prompt_templates["system_prompt"] = system_prompt
+        max_steps=config.MAX_AGENT_TURNS,
+    )   
     return agent
 
 
@@ -214,6 +176,13 @@ def main(args):
     else:
         raise ValueError(f"Invalid reward function: {args.reward_function}")
 
+
+    # Load validation data once at the beginning
+    logging.info("Loading validation dataset for periodic evaluation...")
+    validation_dataset = load_validation_dataset()
+    validation_history_art = []
+    validation_history_toolbrain = []
+
     # --- Select Algorithm and Run Training ---
     brain = None
     if args.algorithm == "GRPO":
@@ -237,12 +206,51 @@ def main(args):
     else:
         raise ValueError(f"Invalid algorithm: {args.algorithm}")
 
+    # --- UPDATED TRAINING LOOP WITH PERIODIC VALIDATION ---
     logging.info(f"Starting training for {config.NUM_TRAIN_EPOCHS} epoch(s)...")
-    # We pass the full prompt to the agent via the 'query' key
-    # and the original question to the judge via the same 'query' key
-    # The reward_kwargs will correctly pass all necessary info to the reward function.
-    brain.train(dataset=training_data, num_iterations=config.NUM_TRAIN_EPOCHS)
+    
+    training_step_counter = 0
+    
+    # Run initial evaluation at step 0 for a baseline
+    logging.info("--- Running initial validation at step 0 ---")
+    # Run evaluation using ART-E's style
+    metrics_art = run_evaluation_art_style(brain.get_agent(), validation_dataset, args.output_dir)
+    validation_history_art.append({'step': 0, **metrics_art})
+    print(f"Validation (ART-Style) at step 0: {metrics_art}")
+
+    # Run evaluation using ToolBrain's style
+    metrics_toolbrain = run_evaluation_toolbrain_style(brain.get_agent(), validation_dataset, args.output_dir)
+    validation_history_toolbrain.append({'step': 0, **metrics_toolbrain})
+    print(f"Validation (ToolBrain-Style) at step 0: {metrics_toolbrain}")
+
+    for i in range(config.NUM_TRAIN_EPOCHS):
+        for example in tqdm(training_data, desc=f"Epoch {i+1}"):
+            brain.train_step(query=example["query"], reward_kwargs=example)
+            training_step_counter += 1
+
+            if training_step_counter % config.VALIDATION_INTERVAL == 0:
+                logging.info(f"--- Running validation at step {training_step_counter} ---")
+                current_agent = brain.get_agent()
+                
+                # Run both evaluation methods
+                metrics_art = run_evaluation_art_style(current_agent, validation_dataset, args.output_dir)
+                validation_history_art.append({'step': training_step_counter, **metrics_art})
+                print(f"Validation (ART-Style) at step {training_step_counter}: {metrics_art}")
+
+                metrics_toolbrain = run_evaluation_toolbrain_style(current_agent, validation_dataset, args.output_dir)
+                validation_history_toolbrain.append({'step': training_step_counter, **metrics_toolbrain})
+                print(f"Validation (ToolBrain-Style) at step {training_step_counter}: {metrics_toolbrain}")
+
     logging.info("--- Training finished! ---")
+
+    # Save both evaluation histories
+    path_art = os.path.join(args.output_dir, "validation_history_art.json")
+    with open(path_art, 'w') as f:
+        json.dump(validation_history_art, f, indent=4)
+
+    path_toolbrain = os.path.join(args.output_dir, "validation_history_toolbrain.json")
+    with open(path_toolbrain, 'w') as f:
+        json.dump(validation_history_toolbrain, f, indent=4)
 
     logging.info(f"Saving fine-tuned model to '{args.output_dir}'...")
     os.makedirs(args.output_dir, exist_ok=True)

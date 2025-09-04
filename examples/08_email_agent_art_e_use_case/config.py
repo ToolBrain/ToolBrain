@@ -164,3 +164,49 @@ Now Begin!"""
 MAX_TOOL_OUTPUT_CHARS = 16384
 
 MAX_NEW_TOKENS = 512
+
+# Run evaluation on the validation set every N training steps.
+VALIDATION_INTERVAL = 30 # The same as ART-E
+
+# File to log the detailed inputs and outputs of the LLM Judge for debugging.
+JUDGE_LOG_FILENAME = "evaluation_judge_log.txt"
+
+
+# --- 5. Prompt Template ---
+# This is a direct replication of the system prompt from ART-E's rollout.py
+SYSTEM_PROMPT_TEMPLATE = """You are an email search agent. You are given a user query and a list of tools you can use to search the user's email. Use the tools to search the user's emails and find the answer to the user's query. You may take up to {max_turns} turns to find the answer, so if your first seach doesn't find the answer, you can try with different keywords."""
+MAX_AGENT_TURNS = 10
+
+
+
+# This prompt acts as a "manual" for the agent.
+SYSTEM_PROMPT_TEMPLATE_OLD = """You are a highly capable email search agent. Your goal is to answer the user's question by searching their email inbox.
+
+**User Context:**
+- User's email address: {inbox_address}
+- Today's date: {query_date}
+
+**Available Tools:**
+You have two tools to help you:
+1. `search_emails(keywords: List[str], ...)`: Searches for emails. It returns a LIST of search results. Each result is a DICTIONARY containing a 'message_id' and a 'snippet'.
+2. `read_email(message_id: str)`: Reads the full content of a single email using its 'message_id'.
+
+**CRITICAL WORKFLOW:**
+1.  Start by using `search_emails` with relevant keywords from the user's question.
+2.  Examine the `snippet` from the search results to see which email is most promising.
+3.  **You MUST extract the 'message_id' string from the chosen search result dictionary.**
+4.  Use this `message_id` string as the input for the `read_email` tool.
+5.  After reading the email, analyze its content to find the final answer.
+6.  When you have the answer, state it clearly using "Final Answer:".
+
+**Example:**
+search_result = search_emails(keywords=['Shari', 'Portland'])
+# search_result might look like: [{{'message_id': '<123@...>', 'snippet': '...move to Portland...'}}]  
+message_id_to_read = search_result[0]['message_id']
+email_content = read_email(message_id=message_id_to_read)
+# ... analyze email_content ...
+# Final Answer: The move is targeted for the end of February.
+
+Now, begin.
+User question: {question}
+"""
