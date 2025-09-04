@@ -17,7 +17,7 @@ from peft import LoraConfig
 # These settings are shared across all experiments in this use case.
 
 # Define the base model to be fine-tuned.
-BASE_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+BASE_MODEL_ID = "Qwen/Qwen2.5-14B-Instruct"
 
 # Define the model to be used as the LLM-as-a-Judge.
 JUDGE_MODEL_ID = "gemini/gemini-2.5-flash-lite"
@@ -161,6 +161,6 @@ Now Begin!"""
 # we can set a character limit for the tool output.
 # The `read_email` tool will truncate the email body if it exceeds this limit.
 # Set to None for no limit. A value around 4000-8000 is recommended for A100 GPUs.
-MAX_TOOL_OUTPUT_CHARS = 2048
+MAX_TOOL_OUTPUT_CHARS = 16384
 
 MAX_NEW_TOKENS = 512

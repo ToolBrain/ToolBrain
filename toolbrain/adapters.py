@@ -26,7 +26,7 @@ import re
 import torch
 
 from .core_types import Trace, Turn, ParsedCompletion, ChatSegment
-
+from .models import UnslothModel
 import logging
 
 
@@ -317,7 +317,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
             is_unsloth_model = (
                 UNSLOTH_AVAILABLE
                 and hasattr(self.agent.model, "model")
-                and isinstance(self.agent.model.model, FastLanguageModel)
+                and isinstance(self.agent.model, UnslothModel)
             )
 
             if is_unsloth_model:
@@ -325,7 +325,15 @@ class SmolAgentAdapter(BaseAgentAdapter):
                     "✅ Applying LoRA configuration using Unsloth's optimized method..."
                 )
                 self.agent.model.model = FastLanguageModel.get_peft_model(
-                    self.agent.model.model, lora_config, use_gradient_checkpointing=True
+                    self.agent.model.model,
+                    # lora_config,
+                    use_gradient_checkpointing="unsloth",
+                    r=lora_config.r,
+                    lora_alpha=lora_config.lora_alpha,
+                    target_modules=lora_config.target_modules,
+                    lora_dropout=lora_config.lora_dropout,
+                    bias=lora_config.bias,
+                    max_seq_length=512,
                 )
             else:
                 print("Applying LoRA configuration using standard PEFT...")

@@ -21,9 +21,9 @@ How to run from the command line (from the project root TOOLBRAIN/):
    python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments \
        --algorithm GRPO --reward_function toolbrain_judge --output_dir ./models/art_e_grpo_toolbrain_judge
 """
-#CUDA_VISIBLE_DEVICES="2" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments        --algorithm GRPO --reward_function toolbrain_judge --output_dir ./models/art_e_grpo_toolbrain_judge_qwen14b_qlora; CUDA_VISIBLE_DEVICES="3" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments --algorithm DPO --reward_function art_judge --output_dir ./models/art_e_dpo_art_judge; CUDA_VISIBLE_DEVICES="2" python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments --algorithm GRPO --reward_function f1 --output_dir ./models/art_e_grpo_f1
+
 import unsloth
-from toolbrain.models import UnslothModel 
+from toolbrain.models import UnslothModel
 
 import argparse
 import os
@@ -34,6 +34,7 @@ from datasets import load_dataset
 # from . import custom_rewards
 # from . import email_tools
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, os.path.dirname(__file__))
 import config
@@ -83,6 +84,7 @@ email_content = read_email(message_id=message_id_to_read)
 Now, begin.
 User question: {question}
 """
+
 
 def load_and_prepare_dataset():
     """
@@ -140,7 +142,9 @@ User question: {item['question']}"""
             }
         )
 
-    logging.info(f"Dataset prepared with {len(formatted_data)} samples using the new detailed prompt.")
+    logging.info(
+        f"Dataset prepared with {len(formatted_data)} samples using the new detailed prompt."
+    )
     return formatted_data
 
 
@@ -149,20 +153,11 @@ def initialize_agent():
     Initializes the TransformersModel and the CodeAgent with the email tools.
     """
     logging.info(f"Initializing base model: '{config.BASE_MODEL_ID}'")
-    # trainable_model = TransformersModel(model_id=config.BASE_MODEL_ID)
-    nf4_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_quant_storage=torch.bfloat16,
-    )
+
     trainable_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
-        # model_kwargs={"quantization_config": nf4_config, 'attn_implementation': "flash_attention_2", },
-        # model_kwargs={'attn_implementation': "flash_attention_2", },
         max_new_tokens=config.MAX_NEW_TOKENS,
-        max_seq_length=(config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS)*5
+        max_seq_length=(config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS) * 5,
     )
 
     logging.info("Initializing CodeAgent with email tools...")

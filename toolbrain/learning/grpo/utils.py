@@ -107,11 +107,11 @@ def build_inputs(
         seq_advs: List[float] = []
 
         for i, segment in enumerate(trace):
-            # if segment['role'] != 'assistant' and i != 0:
+            # if segment["role"] != "assistant" and i != 0:
             #     continue  # Skip non-assistant segments except the first one
             segment_ids = tokenizer.encode(segment["text"], add_special_tokens=False)
-            # if len(seq_ids) + len(segment_ids) > 1536: # 2560 for 7B
-            #     continue
+            if len(seq_ids) + len(segment_ids) > 4096:  # for 14B
+                continue
             seq_ids.extend(segment_ids)
             # Attention mask: 1 for every real token
             seq_attn.extend([1] * len(segment_ids))
