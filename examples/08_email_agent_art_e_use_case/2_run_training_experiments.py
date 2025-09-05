@@ -47,8 +47,9 @@ from smolagents import CodeAgent, TransformersModel
 from transformers import BitsAndBytesConfig
 import torch
 import json
-from .5_run_evaluation_art_style import run_evaluation as run_evaluation_art_style
-from .3_evaluate_agents import run_evaluation_toolbrain_style, load_validation_dataset_for_eval as load_validation_dataset
+from tqdm import tqdm
+from .run_evaluation_art_style import run_evaluation as run_evaluation_art_style
+from .evaluate_agents import run_evaluation_toolbrain_style, load_validation_dataset_for_eval as load_validation_dataset
 
 
 # Setup logging
@@ -118,6 +119,11 @@ def initialize_agent():
     Initializes the TransformersModel and the CodeAgent with the email tools.
     """
     logging.info(f"Initializing base model: '{config.BASE_MODEL_ID}'")
+
+
+    # trainable_model = TransformersModel(
+    #     model_id=config.BASE_MODEL_ID,
+    # )
 
     trainable_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,

@@ -16,7 +16,7 @@ from peft import PeftModel
 from . import config
 from . import email_tools
 from toolbrain.models import UnslothModel 
-from smolagents import CodeAgent
+from smolagents import CodeAgent, TransformersModel
 from toolbrain.adapters import SmolAgentAdapter
 
 try:
@@ -92,6 +92,10 @@ def run_evaluation(agent: CodeAgent, validation_data: List[Dict[str, Any]], outp
     following the ART-E methodology.
     """
     adapter = SmolAgentAdapter(agent=agent, config={})
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
     log_file_path = os.path.join(output_dir, config.JUDGE_LOG_FILENAME)
     
     # Initialize the log file for this evaluation run
@@ -143,6 +147,12 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
     Loads a fine-tuned agent from a specified directory, using the `load_adapter` method.
     """
     logging.info(f"Loading fine-tuned agent from: {model_dir} using Unsloth.")
+
+    # base_model = TransformersModel(
+    #     model_id=config.BASE_MODEL_ID,
+    #     max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
+    #     max_new_tokens=config.MAX_NEW_TOKENS,
+    # )
 
     base_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,

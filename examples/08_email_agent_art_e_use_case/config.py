@@ -17,7 +17,8 @@ from peft import LoraConfig
 # These settings are shared across all experiments in this use case.
 
 # Define the base model to be fine-tuned.
-BASE_MODEL_ID = "Qwen/Qwen2.5-14B-Instruct"
+# BASE_MODEL_ID = "Qwen/Qwen2.5-14B-Instruct"
+BASE_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 
 # Define the model to be used as the LLM-as-a-Judge.
 JUDGE_MODEL_ID = "gemini/gemini-2.5-flash-lite"
@@ -39,7 +40,7 @@ TRAIN_TEST_SPLIT_RATIO = 0.8
 DATASET_SPLIT_SEED = 42
 
 # Keep this for quick development runs. If set, it will override the ratio split.
-MAX_TRAIN_SAMPLES = 200  # Set to None for the full training run
+MAX_TRAIN_SAMPLES = 4  # Set to None for the full training run
 MAX_TEST_SAMPLES = 20
 
 
@@ -166,15 +167,20 @@ MAX_TOOL_OUTPUT_CHARS = 16384
 MAX_NEW_TOKENS = 512
 
 # Run evaluation on the validation set every N training steps.
-VALIDATION_INTERVAL = 30 # The same as ART-E
+VALIDATION_INTERVAL = 2 # The same as ART-E
 
 # File to log the detailed inputs and outputs of the LLM Judge for debugging.
 JUDGE_LOG_FILENAME = "evaluation_judge_log.txt"
 
+JUDGE_TOOL_BRAIN_LOG_FILENAME = "evaluation_judge_toolbrain_log.txt"
+
 
 # --- 5. Prompt Template ---
 # This is a direct replication of the system prompt from ART-E's rollout.py
-SYSTEM_PROMPT_TEMPLATE = """You are an email search agent. You are given a user query and a list of tools you can use to search the user's email. Use the tools to search the user's emails and find the answer to the user's query. You may take up to {max_turns} turns to find the answer, so if your first seach doesn't find the answer, you can try with different keywords."""
+SYSTEM_PROMPT_TEMPLATE = """You are an email search agent. You are given a user query and a list of tools you can use to search the user's email. Use the tools to search the user's emails and find the answer to the user's query. You may take up to {max_turns} turns to find the answer, so if your first seach doesn't find the answer, you can try with different keywords.
+User's email address is {inbox_address}
+Today's date is {query_date}"""
+
 MAX_AGENT_TURNS = 10
 
 

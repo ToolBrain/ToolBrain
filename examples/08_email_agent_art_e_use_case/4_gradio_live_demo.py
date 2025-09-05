@@ -34,6 +34,12 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
     """
     logging.info(f"Loading fine-tuned agent from: {model_dir} using Unsloth.")
 
+    # base_model = TransformersModel(
+    #     model_id=config.BASE_MODEL_ID,
+    #     max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
+    #     max_new_tokens=config.MAX_NEW_TOKENS
+    # )
+
     base_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
         max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,

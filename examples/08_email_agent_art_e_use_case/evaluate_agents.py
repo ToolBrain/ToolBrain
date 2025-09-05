@@ -81,10 +81,16 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
     """
     logging.info(f"Loading fine-tuned agent from: {model_dir} using Unsloth.")
 
+    # base_model = TransformersModel(
+    #     model_id=config.BASE_MODEL_ID,
+    #     # max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
+    #     max_seq_length=8192,
+    #     max_new_tokens=config.MAX_NEW_TOKENS,
+    # )
+
     base_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
-        # max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
-        max_seq_length=8192,
+        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
         max_new_tokens=config.MAX_NEW_TOKENS,
     )
 
@@ -163,7 +169,11 @@ def run_evaluation_toolbrain_style(agent: CodeAgent, validation_data: List[Dict[
     Runs evaluation using ToolBrain's native 3-way classification judge and logs details.
     """
     adapter = SmolAgentAdapter(agent=agent, config={})
-    log_file_path = os.path.join(output_dir, "toolbrain_judge_log.txt") # Use a different log file name
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    log_file_path = os.path.join(output_dir, config.JUDGE_TOOL_BRAIN_LOG_FILENAME) 
 
     with open(log_file_path, 'w', encoding='utf-8') as f:
         f.write(f"--- ToolBrain-Style Judge Log for Evaluation Run ---\n")
