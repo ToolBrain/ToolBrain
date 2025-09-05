@@ -7,6 +7,7 @@ import argparse
 import logging
 import os
 import json
+import time
 from typing import List, Dict, Any
 from datasets import load_dataset
 from tqdm import tqdm
@@ -130,6 +131,7 @@ def run_evaluation(agent: CodeAgent, validation_data: List[Dict[str, Any]], outp
                 num_incorrect += 1
         
         total_turns += len(trace)
+        time.sleep(2)
 
     total_questions = len(validation_data)
     total_attempted_answers = num_correct + num_incorrect
