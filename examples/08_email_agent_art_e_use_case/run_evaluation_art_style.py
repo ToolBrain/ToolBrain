@@ -12,6 +12,7 @@ from typing import List, Dict, Any
 from datasets import load_dataset
 from tqdm import tqdm
 from peft import PeftModel
+from pydantic import BaseModel
 
 # Import from our use case and core modules
 from . import config
@@ -26,6 +27,12 @@ except ImportError:
     litellm = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s")
+
+# --- PYDANTIC MODELS FOR STRUCTURED OUTPUT ---
+
+class ArtJudgeResponse(BaseModel):
+    is_correct: bool
+    explanation: str
 
 # --- CORE FUNCTIONS ---
 
@@ -58,20 +65,35 @@ def load_validation_dataset() -> List[Dict[str, Any]]:
     return formatted_data
 
 def determine_if_correct_art_style(agent_answer: str, gold_answer: str, original_question: str, log_file_path: str) -> bool:
-    """A direct replication of ART-E's judge, with added logging."""
+    """ART-E's judge using structured output for reliability."""
     if litellm is None: return False
     
-    system_prompt = "You will be given an question and two different answers to the question, the correct answer and the answer given by an AI. Your job is to determine if the answer given by the AI is correct. Return True if the answer is semantically similar to the correct answer, and False otherwise. Return only the word True or False, no other text."
+    system_prompt = """You will be given a question and two different answers to the question, the correct answer and the answer given by an AI. Your job is to determine if the answer given by the AI is correct.
+    
+    Return your response in JSON format with:
+    - is_correct: true if the AI answer is semantically similar to the correct answer, false otherwise
+    - explanation: Brief reasoning for your decision"""
+    
     user_prompt = f"Question: {original_question}\nCorrect answer: {gold_answer}\nAI answer: {agent_answer}"
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     
     try:
-        response = litellm.completion(model=config.JUDGE_MODEL_ID, messages=messages, temperature=0.0, max_tokens=2)
-        judge_output = response.choices[0].message.content.strip()
-        is_correct = judge_output.lower().startswith("t")
+        response = litellm.completion(
+            model=config.JUDGE_MODEL_ID, 
+            messages=messages, 
+            response_format=ArtJudgeResponse,
+            temperature=0.0
+        )
+        
+        # Parse the structured response
+        result_obj = response.choices[0].message.parsed
+        is_correct = result_obj.is_correct
+        judge_output = f"is_correct: {is_correct}, explanation: {result_obj.explanation}"
+        
     except Exception as e:
         judge_output = f"ERROR: {e}"
         is_correct = False
+        result_obj = None
 
     # Detailed Logging for debugging
     with open(log_file_path, 'a', encoding='utf-8') as f:
@@ -80,7 +102,7 @@ def determine_if_correct_art_style(agent_answer: str, gold_answer: str, original
             "agent_answer": agent_answer,
             "gold_answer": gold_answer,
             "judge_prompt": messages,
-            "judge_output_raw": judge_output,
+            "judge_output_structured": judge_output,
             "verdict": "CORRECT" if is_correct else "INCORRECT"
         }
         f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")

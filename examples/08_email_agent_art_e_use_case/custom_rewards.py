@@ -11,11 +11,18 @@ from collections import Counter
 from typing import List, Dict, Any
 
 from toolbrain.core_types import Trace
+from pydantic import BaseModel
 
 try:
     import litellm
 except ImportError:
     litellm = None
+
+# --- PYDANTIC MODELS FOR STRUCTURED OUTPUT ---
+
+class CustomJudgeResponse(BaseModel):
+    is_correct: bool
+    explanation: str
 
 # --- Reward Function A: Metric-based (F1 Score) ---
 
@@ -103,7 +110,12 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
     # 3. Call the LLM Judge to determine correctness
     is_correct = False
     try:
-        system_prompt = "You are an AI evaluator. Your job is to determine if an AI's answer is correct. Return True if the answer is semantically similar to the correct answer, and False otherwise. Return only the word True or False."
+        system_prompt = """You are an AI evaluator. Your job is to determine if an AI's answer is correct.
+        
+        Return your response in JSON format with:
+        - is_correct: true if the AI answer is semantically similar to the correct answer, false otherwise
+        - explanation: Brief reasoning for your decision"""
+        
         user_prompt = f"Question: {query}\nCorrect answer: {gold_answer}\nAI answer: {agent_answer}"
         
         messages = [
@@ -114,11 +126,13 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
         response = litellm.completion(
             model=judge_model,
             messages=messages,
-            temperature=0.0,
-            max_tokens=5
+            response_format=CustomJudgeResponse,
+            temperature=0.0
         )
-        response_text = response.choices[0].message.content or ""
-        is_correct = response_text.strip().lower().startswith("t")
+        
+        # Parse structured response
+        result_obj = response.choices[0].message.parsed
+        is_correct = result_obj.is_correct
 
     except Exception as e:
         logging.error(f"Error calling LLM Judge for ART-style reward: {e}")

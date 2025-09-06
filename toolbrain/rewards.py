@@ -9,6 +9,7 @@ cases without a single gold answer.
 from typing import Any, Optional, List, Union, Callable
 from .core_types import Trace, RewardFunction, BatchRewardFunction
 import re
+from pydantic import BaseModel
 
 def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
     """
@@ -117,33 +118,93 @@ try:
 except ImportError:
     litellm = None
 
-def _format_traces_for_ranking(traces: List[Trace]) -> str:
+# --- PYDANTIC MODELS FOR STRUCTURED OUTPUT ---
+
+class JudgeRankingResponse(BaseModel):
+    ranking: List[int]  # e.g., [1, 3, 2] 
+    reasoning: str  # Brief explanation of ranking decision
+
+# --- TRACE SUMMARIZATION FUNCTIONS ---
+
+def _summarize_trace_for_judge(trace: Trace, query: str) -> str:
     """
-    Formats a list of traces into a single string for an LLM judge.
-    Uses the pre-formatted conversation text from smolagents utilities for consistency.
+    Summarizes a trace into a concise format for LLM judge evaluation.
+    Only includes essential information: query, reasoning flow, final answer.
+    """
+    if not trace:
+        return "Empty trace - no actions taken"
+    
+    summary_parts = []
+    
+    # 1. Add the query
+    summary_parts.append(f"Query: {query}")
+    summary_parts.append("")
+    
+    # 2. Extract reasoning and action flow (without long tool outputs)
+    summary_parts.append("Reasoning & Action Flow:")
+    for i, turn in enumerate(trace, 1):
+        thought = turn.get("parsed_completion", {}).get("thought", "").strip()
+        tool_call = turn.get("parsed_completion", {}).get("tool_call", {})
+        
+        if thought:
+            summary_parts.append(f"  {i}. Thought: {thought[:200]}{'...' if len(thought) > 200 else ''}")
+        
+        if tool_call:
+            tool_name = tool_call.get("tool_name", "unknown")
+            # Summarize tool arguments without full content
+            args = tool_call.get("arguments", {})
+            if args:
+                # Only show key argument names, not values
+                arg_summary = ", ".join(f"{k}: {str(v)[:50]}{'...' if len(str(v)) > 50 else ''}" for k, v in args.items())
+                summary_parts.append(f"     Action: {tool_name}({arg_summary})")
+            else:
+                summary_parts.append(f"     Action: {tool_name}()")
+    
+    summary_parts.append("")
+    
+    # 3. Extract final answer
+    final_answer = "No final answer provided"
+    for turn in reversed(trace):
+        parsed = turn.get("parsed_completion", {})
+        if parsed.get("final_answer"):
+            final_answer = parsed["final_answer"]
+            break
+    
+    summary_parts.append(f"Final Answer: {final_answer}")
+    
+    return "\n".join(summary_parts)
+
+def _format_traces_for_ranking(traces: List[Trace], query: str = "") -> str:
+    """
+    Formats a list of traces into a summarized string for an LLM judge.
+    Uses trace summarization to reduce noise and bias from long tool outputs.
     """
     parts = []
     for i, trace in enumerate(traces):
-        # Use the formatted conversation text that was generated using smolagents utilities
-        # This ensures 100% consistency with the training data format
         if trace and len(trace) > 0:
-            formatted_text = trace[0].get("formatted_conversation", "")
-            
-            # If no formatted text available, fall back to simple representation
-            if not formatted_text:
-                trace_parts = []
-                for turn in trace:
-                    if turn.get('model_completion'):
-                        trace_parts.append(turn['model_completion'])
-                    if turn.get('tool_output'):
-                        trace_parts.append(f"Tool Output: {turn['tool_output']}")
-                formatted_text = "\n".join(trace_parts)
-            
-            # Truncate if too long
-            if len(formatted_text) > 2000:
-                formatted_text = formatted_text[:1970] + "\n... [truncated]"
+            # Use summarization instead of raw trace data
+            if query:
+                summary = _summarize_trace_for_judge(trace, query)
+                parts.append(f"<trajectory id='{i+1}'>\n{summary}\n</trajectory>")
+            else:
+                # Fallback to formatted conversation if no query provided
+                formatted_text = trace[0].get("formatted_conversation", "")
                 
-            parts.append(f"<trajectory id='{i+1}'>\n{formatted_text}\n</trajectory>")
+                # If no formatted text available, fall back to simple representation
+                if not formatted_text:
+                    trace_parts = []
+                    for turn in trace:
+                        if turn.get('model_completion'):
+                            trace_parts.append(turn['model_completion'])
+                        if turn.get('tool_output'):
+                            trace_parts.append(f"Tool Output: {turn['tool_output'][:200]}...")
+                    formatted_text = "\n".join(trace_parts)
+                
+                # Truncate if too long
+                if len(formatted_text) > 2000:
+                    formatted_text = formatted_text[:1970] + "\n... [truncated]"
+                    
+                parts.append(f"<trajectory id='{i+1}'>\n{formatted_text}\n</trajectory>")
         else:
             parts.append(f"<trajectory id='{i+1}'>\n[Empty trace]\n</trajectory>")
     
@@ -225,13 +286,14 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
     if not all([query, judge_model]):
         raise ValueError("`reward_llm_judge_via_ranking` requires 'query' and 'judge_model' in kwargs.")
 
-    # 1. Prepare prompt for judge
-    traces_str = _format_traces_for_ranking(traces)
-    system_prompt = (
-        "You are a fair and impartial AI performance evaluator. "
-        "Your task is to rank multiple agent trajectories based on their quality."
-        "You output ONLY the requested format and nothing else."
-    )
+    # 1. Prepare prompt for judge with query context
+    traces_str = _format_traces_for_ranking(traces, query)
+    system_prompt = """You are a fair and impartial AI performance evaluator. Your task is to rank multiple agent trajectories based on their quality.
+    
+    Return your response in JSON format with:
+    - ranking: A list of trajectory IDs ranked from BEST to WORST (e.g., [3, 1, 2])
+    - reasoning: Brief explanation of your ranking decision"""
+    
     user_prompt = f"""User Query:
 {query}
 
@@ -240,11 +302,7 @@ Agent Trajectories:
 
 ---
 INSTRUCTION:
-Review all trajectories above. Rank them from BEST to WORST based on correctness, efficiency, and adherence to the query.
-Your response MUST be a single line containing ONLY a Python list of the trajectory IDs in ranked order. Do not add any explanation or introductory text.
-
-Example format: [3, 1, 2]
-"""
+Review all trajectories above. Rank them from BEST to WORST based on correctness, efficiency, and adherence to the query."""
 
     # 2. Call LLM Judge
     try:
@@ -255,15 +313,28 @@ Example format: [3, 1, 2]
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.0,
-            max_tokens=100 
+            response_format=JudgeRankingResponse,
+            temperature=0.0
         )
-        response_text = response["choices"][0]["message"]["content"] or ""
         
-        print(f"    ✅ LLM Judge response: {response_text}")
+        # Parse structured response
+        try:
+            # Try structured parsing first
+            result_obj = response.choices[0].message.parsed
+            ranking = result_obj.ranking
+            reasoning = result_obj.reasoning
+        except (AttributeError, KeyError):
+            # Fallback: parse JSON from content
+            import json
+            content = response.choices[0].message.content
+            result_dict = json.loads(content)
+            ranking = result_dict.get("ranking", [])
+            reasoning = result_dict.get("reasoning", "No reasoning provided")
         
-        # 3. Parse ranking from result
-        ranking = _parse_ranking_from_llm(response_text, num_traces)
+        print(f"    ✅ LLM Judge ranking: {ranking}")
+        print(f"    📝 Judge reasoning: {reasoning[:100]}...")
+        
+        # 3. Validate ranking
         
         if ranking:
             # 4. Convert ranking to scores

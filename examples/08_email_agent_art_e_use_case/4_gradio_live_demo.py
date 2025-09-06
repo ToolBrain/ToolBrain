@@ -29,31 +29,31 @@ AGENT = None
 
 def load_trained_agent(model_dir: str) -> CodeAgent:
     """
-    Loads a fine-tuned agent from a specified directory, ensuring that Unsloth
-    optimizations are applied for inference, consistent with training.
+    Loads a fine-tuned agent from a specified directory, using the `load_adapter` method.
     """
     logging.info(f"Loading fine-tuned agent from: {model_dir} using Unsloth.")
 
     # base_model = TransformersModel(
     #     model_id=config.BASE_MODEL_ID,
     #     max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
-    #     max_new_tokens=config.MAX_NEW_TOKENS
+    #     max_new_tokens=config.MAX_NEW_TOKENS,
     # )
 
     base_model = UnslothModel(
         model_id=config.BASE_MODEL_ID,
         max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
-        max_new_tokens=config.MAX_NEW_TOKENS
+        max_new_tokens=config.MAX_NEW_TOKENS,
     )
 
-    peft_model = PeftModel.from_pretrained(base_model.model, model_dir)
-    base_model.model = peft_model
+    base_model.model.load_adapter(model_dir)
     
     agent = CodeAgent(
         tools=[email_tools.search_emails, email_tools.read_email],
-        model=base_model
+        model=base_model,
+        max_steps=config.MAX_AGENT_TURNS,
     )
-    logging.info("✅ Agent loaded successfully with Unsloth optimizations.")
+    
+    logging.info("Agent loaded successfully.")
     return agent
 
 def chat_interface(message, history):
@@ -68,7 +68,7 @@ def chat_interface(message, history):
     logging.info(f"Received user query: '{message}'")
     
     # For a live demo, we can use placeholder context.
-    full_prompt = f"""You are an email search agent.
+    full_prompt = f"""You are an email search agent. You are given a user query and a list of tools you can use to search the user's email. Use the tools to search the user's emails and find the answer to the user's query. You may take up to 10 turns to find the answer, so if your first seach doesn't find the answer, you can try with different keywords..
 User's email address is jane.doe@enron.com
 Today's date is 2001-09-01
 

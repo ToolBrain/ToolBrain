@@ -36,6 +36,7 @@ import email_tools
 from smolagents import CodeAgent, TransformersModel
 from toolbrain.adapters import SmolAgentAdapter
 from toolbrain.models import UnslothModel
+from pydantic import BaseModel
 
 # try:
 #     import litellm
@@ -47,6 +48,12 @@ import litellm
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s"
 )
+
+# --- PYDANTIC MODELS FOR STRUCTURED OUTPUT ---
+
+class JudgeResponse(BaseModel):
+    verdict: str  # "CORRECT", "INCORRECT", or "NO_ANSWER"
+    reasoning: str  # Brief explanation of the decision
 
 
 def load_validation_dataset_for_eval() -> List[Dict[str, Any]]:
@@ -110,16 +117,19 @@ def classify_answer_with_llm(
     agent_answer: str, gold_answer: str, original_question: str, log_file_path: str
 ) -> str:
     """
-    Uses a powerful LLM to classify the agent's answer into one of three categories.
+    Uses a powerful LLM to classify the agent's answer into one of three categories using structured output.
     """
 
     system_prompt = """You are a meticulous AI evaluator. Your task is to classify an agent's answer into one of three categories based on a ground truth answer.
+
 The categories are:
 1. CORRECT: The agent's answer is factually and semantically equivalent to the ground truth.
 2. INCORRECT: The agent's answer provides factually wrong information. This is a hallucination.
 3. NO_ANSWER: The agent explicitly states it cannot find the answer, does not know, or that no information is available (e.g., "no email found").
 
-Respond with ONLY ONE WORD: CORRECT, INCORRECT, or NO_ANSWER."""
+Return your response in JSON format with:
+- verdict: "CORRECT", "INCORRECT", or "NO_ANSWER"
+- reasoning: Brief explanation of your decision"""
 
     user_prompt = f"""Question: {original_question}
 Ground Truth Answer: {gold_answer}
@@ -134,14 +144,23 @@ Agent's Answer: {agent_answer}"""
         response = litellm.completion(
             model=config.JUDGE_MODEL_ID,
             messages=messages,
+            response_format=JudgeResponse,
             temperature=0.0,
-            max_tokens=5,
         )
-        result = response.choices[0].message.content.strip().upper()
+        
+        # Parse structured response
+        result_obj = response.choices[0].message.parsed
+        result = result_obj.verdict.upper()
 
+        # Validate verdict
         if result in ["CORRECT", "INCORRECT", "NO_ANSWER"]:
             with open(log_file_path, 'a', encoding='utf-8') as f:
-                log_entry = {"question": original_question, "agent_answer": agent_answer, "verdict": result}
+                log_entry = {
+                    "question": original_question, 
+                    "agent_answer": agent_answer, 
+                    "verdict": result,
+                    "reasoning": result_obj.reasoning
+                }
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
             return result
         else:
@@ -149,7 +168,7 @@ Agent's Answer: {agent_answer}"""
                 f"Judge returned an invalid classification: '{result}'. Defaulting to INCORRECT."
             )
             with open(log_file_path, 'a', encoding='utf-8') as f:
-                log_entry = {"question": original_question, "agent_answer": agent_answer, "verdict": "INCORRECT"}
+                log_entry = {"question": original_question, "agent_answer": agent_answer, "verdict": "INCORRECT", "reasoning": "Invalid verdict"}
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
             return "INCORRECT"
 
@@ -159,7 +178,7 @@ Agent's Answer: {agent_answer}"""
         logging.error(user_prompt)
         logging.error(f"--- END OF FAILED PROMPT ---")
         with open(log_file_path, 'a', encoding='utf-8') as f:
-            log_entry = {"question": original_question, "agent_answer": agent_answer, "verdict": "INCORRECT"}
+            log_entry = {"question": original_question, "agent_answer": agent_answer, "verdict": "INCORRECT", "reasoning": f"Error: {e}"}
             f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
         return "INCORRECT"
 
