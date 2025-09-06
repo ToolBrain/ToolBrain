@@ -160,10 +160,6 @@ def main(args):
 
     elif args.reward_function == "art_judge":
         reward_func = custom_rewards.reward_art_style_judge
-        for item in training_data:
-            # The ART-style judge needs the original question for its prompt
-            item["query"] = item["original_question"]
-            item["judge_model"] = config.JUDGE_MODEL_ID
         logging.info(
             f"Using ART-E style direct-assessment judge ('{config.JUDGE_MODEL_ID}')."
         )
@@ -171,10 +167,6 @@ def main(args):
     # --- NEW OPTION: Use ToolBrain's native ranking judge ---
     elif args.reward_function == "toolbrain_judge":
         reward_func = core_rewards.reward_llm_judge_via_ranking
-        for item in training_data:
-            # The ranking judge also needs the original question and judge model
-            item["query"] = item["original_question"]
-            item["judge_model"] = config.JUDGE_MODEL_ID
         logging.info(
             f"Using ToolBrain's native ranking-based judge ('{config.JUDGE_MODEL_ID}')."
         )

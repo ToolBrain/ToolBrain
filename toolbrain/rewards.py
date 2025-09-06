@@ -280,7 +280,7 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
         return []
 
     num_traces = len(traces)
-    query = kwargs.get("query")
+    query = kwargs.get("original_question")
     judge_model = kwargs.get("judge_model")
 
     if not all([query, judge_model]):

@@ -12,6 +12,8 @@ from typing import List, Dict, Any
 
 from toolbrain.core_types import Trace
 from pydantic import BaseModel
+import logging
+import config
 
 try:
     import litellm
@@ -95,9 +97,9 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
         return 0.0
 
     # 1. Extract necessary information
-    query = kwargs.get("query")
+    query = kwargs.get("original_question")
     gold_answer = kwargs.get("gold_answer")
-    judge_model = kwargs.get("judge_model")
+    judge_model = kwargs.get("judge_model", config.JUDGE_MODEL_ID)
     agent_answer = _get_agent_final_answer(trace)
 
     if not all([query, gold_answer, judge_model]):
