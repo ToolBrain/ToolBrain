@@ -173,19 +173,37 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 if step.error:
                     tool_output_str += f"\nError: {str(step.error)}"
 
+                # Initialize variables
+                tool_code = step.code_action
+                final_answer_from_tool_call = None
+
+                if tool_code and tool_code.strip().startswith("final_answer("):
+                    match = re.search(r"final_answer\((.*?)\)$", tool_code.strip(), re.DOTALL)
+                    if match:
+                        answer_content = match.group(1).strip()
+                        if (answer_content.startswith("'") and answer_content.endswith("'")) or \
+                           (answer_content.startswith('"') and answer_content.endswith('"')):
+                            final_answer_from_tool_call = answer_content[1:-1]
+                        else:
+                            final_answer_from_tool_call = answer_content
+                        tool_code = None
+
                 parsed_completion: ParsedCompletion = {
                     "thought": None,
-                    "tool_code": step.code_action,
-                    "final_answer": None,
+                    "tool_code": tool_code,
+                    "final_answer": final_answer_from_tool_call,
                 }
 
                 missing_parts = self._parse_missing_parts(model_completion_str)
 
-                parsed_completion["thought"] = missing_parts.get("thought")
+                if not parsed_completion["thought"]:
+                    parsed_completion["thought"] = missing_parts.get("thought")
+
                 if not parsed_completion["final_answer"]:
                     parsed_completion["final_answer"] = missing_parts.get(
                         "final_answer"
                     )
+                    
                 if step.model_input_messages is not None:
                     prompt_for_model_str = (
                         self.agent.model.tokenizer.apply_chat_template(
