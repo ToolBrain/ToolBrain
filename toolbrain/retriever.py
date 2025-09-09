@@ -26,31 +26,32 @@ class ToolRetriever:
 
         """
         # Create a prompt for the LLM to select relevant resources
-        prompt = f"""
-You play a role as an expert assistant in the {topic}. Your task is to select the relevant resources to help answer a user's query.
+        prompt = """
+            You play a role as an expert assistant in the {topic}. Your task is to select the relevant resources to help answer a user's query.
 
-USER QUERY: {query}
+            USER QUERY: {query}
 
-Below are the available resources. For each category, select items that are directly or indirectly relevant to answering the query.
-Be generous in your selection - include resources that might be useful for the task, even if they're not explicitly mentioned in the query.
-It's better to include slightly more resources than to miss potentially useful ones.
+            Below are the available resources. For each category, select items that are directly or indirectly relevant to answering the query.
+            Be generous in your selection - include resources that might be useful for the task, even if they're not explicitly mentioned in the query.
+            It's better to include slightly more resources than to miss potentially useful ones.
 
-AVAILABLE TOOLS:
-{self._format_resources_for_prompt(resources.get("tools", []))}
+            AVAILABLE TOOLS:
+            {tools}
 
-For each category, respond with ONLY the indices of the relevant items in the following format:
-TOOLS: [list of indices]
+            For each category, respond with ONLY the indices of the relevant items in the following format:
+            TOOLS: [list of indices]
 
-For example:
-TOOLS: [0, 3, 5, 7, 9]
-DATA_LAKE: [1, 2, 4]
-LIBRARIES: [0, 2, 4, 5, 8]
+            For example:
+            TOOLS: [0, 3, 5, 7, 9]
 
-If a category has no relevant items, use an empty list, e.g., TOOLS: []
+            If a category has no relevant items, use an empty list, e.g., TOOLS: []
 
-IMPORTANT GUIDELINES:
-{guideline if guideline else "1. Focus on relevance to the query.\n2. Be comprehensive in your selection.\n3. Avoid including irrelevant items."}
-"""
+            IMPORTANT GUIDELINES:
+            {guideline} 
+        """.format(topic=topic, 
+        query=query, 
+        tools=self._format_resources_for_prompt(resources.get("tools", [])),
+        guideline=guideline or "1. Focus on relevance to the query.\n2. Be comprehensive in the selection.\n3. Avoid including irrelevant items.")
 
         # Use the provided LLM or create a new one
         if llm is None:
@@ -85,7 +86,9 @@ IMPORTANT GUIDELINES:
                 # Handle dictionary format (from tool registry or data lake/libraries with descriptions)
                 name = resource.get("name", f"Resource {i}")
                 description = resource.get("description", "")
-                formatted.append(f"{i}. {name}: {description}")
+                inputs = resource.get("inputs", None)
+                output_type = resource.get("output_type", None)
+                formatted.append(f"{i}. {name}: {description}" + f". Inputs: {inputs}. Output_type: {output_type}" if inputs or output_type else "")
             elif isinstance(resource, str):
                 # Handle string format (simple strings)
                 formatted.append(f"{i}. {resource}")
@@ -93,7 +96,9 @@ IMPORTANT GUIDELINES:
                 # Try to extract name and description from tool objects
                 name = getattr(resource, "name", str(resource))
                 desc = getattr(resource, "description", "")
-                formatted.append(f"{i}. {name}: {desc}")
+                inputs = getattr(resource, "inputs", None)
+                output_type = getattr(resource, "output_type", None)
+                formatted.append(f"{i}. Name: {name}, Description: {desc}"+ f". Inputs: {inputs}. Output_type: {output_type}" if inputs or output_type else "")
 
         return "\n".join(formatted) if formatted else "None available"
 
@@ -103,6 +108,7 @@ IMPORTANT GUIDELINES:
 
         # Extract indices for each category
         tools_match = re.search(r"TOOLS:\s*\[(.*?)\]", response, re.IGNORECASE)
+        print(response)
         if tools_match and tools_match.group(1).strip():
             with contextlib.suppress(ValueError):
                 selected_indices["tools"] = [int(idx.strip()) for idx in tools_match.group(1).split(",") if idx.strip()]
