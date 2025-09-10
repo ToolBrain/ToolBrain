@@ -36,7 +36,7 @@ api_key = os.getenv("OPEN_AI_KEY")
 if not api_key:
     raise ValueError("Please set the OPENAI_API_KEY environment variable.")
 llm = ChatOpenAI(model="gpt-4o", api_key=api_key)  # Replace with your actual API key
-guideline = """
+guidelines = """
 1. Focus on relevance to the query.
 2. Select tools that can directly address the user's needs.
 3. Avoid including irrelevant items.
@@ -48,5 +48,5 @@ list_pairs = [("Write a programme to analyze my csv files to count how many item
 ("Find images of Effel Tower and then generate an image showing the superman flying to top of Effel Tower", "Photo Editting")]
 for query, topic in list_pairs:
     print(f"\nQuery: {query}\nTopic: {topic}")
-    selected = retriever.prompt_based_retrieval(query, resources, topic=topic, llm=llm, guideline=guideline)
+    selected = retriever.prompt_based_retrieval(query, resources, topic=topic, llm=llm, guidelines=guidelines)
     print("Selected Resources:", selected)
