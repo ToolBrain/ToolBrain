@@ -12,7 +12,7 @@ class ToolRetriever:
     def __init__(self):
         pass
 
-    def prompt_based_retrieval(self, query: str, resources: dict, llm=None, topic='bio medial', guideline="") -> dict:
+    def prompt_based_retrieval(self, query: str, resources: dict, llm=None, topic='bio medial', guidelines="") -> dict:
         """Use a prompt-based approach to retrieve the most relevant resources for a query.
 
         Args:
@@ -49,7 +49,7 @@ class ToolRetriever:
             If a category has no relevant items, use an empty list, e.g., TOOLS: []
 
             IMPORTANT GUIDELINES:
-            {guideline} 
+            {guidelines} 
         """.format(topic=topic, 
         query=query, 
         tools=self._format_resources_for_prompt(resources.get("tools", [])),
