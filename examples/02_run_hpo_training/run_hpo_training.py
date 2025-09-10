@@ -6,6 +6,8 @@ This script now supports two modes:
           and generates a plot for the demo video.
 
 python examples/02_run_hpo_training/run_hpo_training.py --mode demo
+
+python examples/02_run_hpo_training/run_hpo_training.py --mode train --output_dir ./models/my_trained_hpo_agent
 """
 
 import os
@@ -164,6 +166,7 @@ def main(args):
 
     # --- The rest of the code is for 'train' mode ---
     print("\n🧠 Starting TRAINING mode...")
+    print(f"   - Output directory for trained model: {args.output_dir}")
 
     # User only needs to pass their agent to Brain
     brain = Brain(
@@ -192,9 +195,19 @@ def main(args):
 
     brain.train(training_dataset, num_iterations=5)
 
+    print(f"\n💾 Saving fine-tuned model to '{args.output_dir}'...")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+
     # Get the trained agent
     trained_agent = brain.get_agent()
-    print("\n🤖 Agent after training is ready to use.")
+
+    trained_agent.model.model.save_pretrained(args.output_dir)
+    trained_agent.model.tokenizer.save_pretrained(args.output_dir)
+    
+    print(f"✅ Model successfully saved to '{args.output_dir}'.")
+    print("\n🤖 Agent after training is ready to use and saved for evaluation.")
 
 
 if __name__ == "__main__":
@@ -204,8 +217,19 @@ if __name__ == "__main__":
         type=str,
         default="train",
         choices=["train", "demo"],
-        help="The mode to run the script in: 'train' for RL training, 'demo' to showcase untrained behavior."
+        help="The mode to run the script in."
     )
+    
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="./models/hpo_agent_v1", 
+        help="The directory where the fine-tuned model will be saved (used in 'train' mode)."
+    )
+    
     args = parser.parse_args()
     
+    if args.mode == 'train' and args.output_dir is None:
+        parser.error("--output_dir is required when running in 'train' mode.")
+
     main(args)

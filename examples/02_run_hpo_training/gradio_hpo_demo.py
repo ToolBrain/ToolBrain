@@ -8,7 +8,7 @@ How to run from the command line (from the project root TOOLBRAIN/):
 # First, ensure you have a trained model saved in a directory.
 # Then, run the demo:
 python -m examples.02_run_hpo_training.gradio_hpo_demo \
-    --model_dir ./models/hpo_grpo_toolbrain
+    --model_dir ./models/my_trained_hpo_agent
 """
 
 import argparse

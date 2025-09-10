@@ -6,7 +6,7 @@ Evaluate a fine-tuned HPO agent.
 This script loads a trained agent, runs it multiple times to see how it
 explores the parameter space, and generates a plot of its performance.
 
-Run `python examples/02_run_hpo_training/evaluate_hpo_agent.py --model_dir <model_directory>` to execute.
+Run `python examples/02_run_hpo_training/evaluate_hpo_agent.py --model_dir ./models/my_trained_hpo_agent
 """
 
 import argparse
