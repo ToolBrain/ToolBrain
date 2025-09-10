@@ -20,6 +20,8 @@ class ToolRetriever:
             resources: A dictionary with keys 'tools', 'data_lake', and 'libraries',
                       each containing a list of available resources
             llm: Optional LLM instance to use for retrieval (if None, will create a new one)
+            topic: Topic that supported by agents of toolbrain
+            guideline: Important or specific guideline related to a specific topic
 
         Returns:
             A dictionary with the same keys, but containing only the most relevant resources
@@ -108,41 +110,8 @@ class ToolRetriever:
 
         # Extract indices for each category
         tools_match = re.search(r"TOOLS:\s*\[(.*?)\]", response, re.IGNORECASE)
-        print(response)
         if tools_match and tools_match.group(1).strip():
             with contextlib.suppress(ValueError):
                 selected_indices["tools"] = [int(idx.strip()) for idx in tools_match.group(1).split(",") if idx.strip()]
 
         return selected_indices
-
-if __name__ == "__main__":
-    # Example usage
-    retriever = ToolRetriever()
-    api_key = os.getenv("OPEN_AI_KEY")
-    if not api_key:
-        raise ValueError("Please set the OPENAI_API_KEY environment variable.")
-    llm = ChatOpenAI(model="gpt-4o", api_key=api_key)  # Replace with your actual API key
-    guideline = """
-        1. Be generous but not excessive - aim to include all potentially relevant resources
-        2. ALWAYS prioritize database tools for general queries - include as many database tools as possible
-        3. Include all literature search tools
-        4. For wet lab sequence type of queries, ALWAYS include molecular biology tools
-        5. For data lake items, include datasets that could provide useful information
-        6. For libraries, include those that provide functions needed for analysis
-        7. Don't exclude resources just because they're not explicitly mentioned in the query
-        8. When in doubt about a database tool or molecular biology tool, include it rather than exclude it
-    """
-    resources = {
-        "tools": [
-            {"name": "BLAST", "description": "Tool for comparing an amino acid or nucleotide sequence to sequence databases."},
-            {"name": "ClustalW", "description": "Tool for multiple sequence alignment."},
-            {"name": "Gene Ontology", "description": "A framework for the model of biology that relates to gene functions."},
-            {"name": "OpenCV", "description": "A framework for computer vision tasks."},
-            {"name": "ReactJS", "description": "A framework for web development."},
-        ],
-    }
-    list_pairs = [("Find similar protein sequences and analyze their functions.", "bio medical"), ("Blur region of a cat in my uploaded image and show it at top right of my website.", "photo editing"), ("Blur region of a cat in my uploaded image.", "photo editing")]
-    for query, topic in list_pairs:
-        print(f"\nQuery: {query}\nTopic: {topic}")
-        selected = retriever.prompt_based_retrieval(query, resources, topic=topic, llm=llm, guideline=guideline)
-        print("Selected Resources:", selected)
