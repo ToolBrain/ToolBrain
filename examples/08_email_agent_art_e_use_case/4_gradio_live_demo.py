@@ -58,22 +58,28 @@ def load_trained_agent(model_dir: str) -> CodeAgent:
 
 def chat_interface(message, history):
     """
-    This is the core function that Gradio calls for each user interaction.
-    It runs the agent with the user's message and streams the output.
+    Core function for Gradio interaction. It wraps the user's message in the
+    exact, consistent context the agent was trained on.
     """
     if AGENT is None:
-        yield "Error: Agent has not been loaded. Please check the model directory and restart."
+        yield "Error: Agent not loaded."
         return
 
     logging.info(f"Received user query: '{message}'")
     
-    # For a live demo, we can use placeholder context.
-    full_prompt = f"""You are an email search agent. You are given a user query and a list of tools you can use to search the user's email. Use the tools to search the user's emails and find the answer to the user's query. You may take up to 10 turns to find the answer, so if your first seach doesn't find the answer, you can try with different keywords..
-User's email address is jane.doe@enron.com
-Today's date is 2001-09-01
+    # --- Use the exact context from the successful trace ---
+    # This ensures maximum reliability for the demo.
+    simulated_inbox = "gerald.nemec@enron.com"
+    simulated_date = "2000-04-30"
 
-User question: {message}
-"""
+    full_prompt = config.SYSTEM_PROMPT_TEMPLATE.format(
+        max_turns=config.MAX_AGENT_TURNS,
+        inbox_address=simulated_inbox,
+        query_date=simulated_date,
+        question=message # The user's question from the Gradio interface
+    )
+    
+    logging.info(f"Constructed full prompt for agent:\n{full_prompt}")
     
     try:
         yield from stream_to_gradio(AGENT.run(full_prompt, stream=True))
