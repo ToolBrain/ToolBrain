@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Data
+data/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -77,3 +80,7 @@ Thumbs.db
 
 # Windows
 *.stackdump 
+
+log/
+logs/
+segments/

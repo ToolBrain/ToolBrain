@@ -1,0 +1,15 @@
+torch
+transformers
+smolagents[transformers]
+duckduckgo_search
+dotenv
+numpy<2.0
+accelerate
+hf_xet
+peft
+litellm
+google-generativeai
+bitsandbytes
+unsloth
+gradio
+datasets>=3.4.1,<4.0.0

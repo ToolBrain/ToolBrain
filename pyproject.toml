@@ -27,6 +27,13 @@ dependencies = [
     "openai>=1.0.0",
     "typing-extensions>=4.0.0",
     "python-dotenv>=1.0.0",
+    "peft>=0.17.0",
+    "litellm",
+    "google-generativeai",
+    "bitsandbytes",
+    "unsloth",
+    "gradio",
+    "datasets>=3.4.1,<4.0.0",
 ]
 
 [project.optional-dependencies]
