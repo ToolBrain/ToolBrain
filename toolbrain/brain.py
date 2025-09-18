@@ -6,8 +6,11 @@ It automatically detects the agent type and uses the appropriate adapter.
 """
 
 import gc
+import json
+import os
+import re
 from collections import deque
-from typing import Any, List, Dict, Union
+from typing import Any, List, Dict, Union, Optional, Callable, Tuple
 
 import numpy as np
 
@@ -19,7 +22,7 @@ from .learning.dpo.algo import DPOAlgorithm
 from .learning.dpo.utils import make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
-from smolagents import CodeAgent, ChatMessage, MessageRole
+from smolagents import CodeAgent, ChatMessage, MessageRole, TransformersModel
 import torch
 from textwrap import dedent
 GRPOALiasNames = ["GRPO", "grpo"]
@@ -91,6 +94,7 @@ class Brain:
             raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
         print("   ✅ Learning module initialized.")
         self.reward_buffer = deque(maxlen=10)
+        
         print("\n✅ Brain is ready for training.")
 
     def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
@@ -262,16 +266,12 @@ class Brain:
             # Try to get adapter for the agent
             if isinstance(agent, CodeAgent):
                 return True
-            # Future: add more agent type checks here
-            # elif isinstance(agent, ConversableAgent):
-            #     return True
-            # elif isinstance(agent, LLMChain):
-            #     return True
+
             else:
                 return False
         except Exception:
             return False
-        
+    
     def _craft_prompt_request(self, task_description: str, variant_idx: int = 0) -> str:
         text = dedent(f"""\
             You are designing training prompts to enable zero-paradigm tool learning for a tool-using LLM agent. The generated prompt will be used to fine-tune an agent with reinforcement learning (RL) methods (e.g., GRPO/PPO/DPO).
@@ -352,3 +352,223 @@ class Brain:
             })
 
         return examples
+    
+
+    def _extract_accuracy_from_trace(self, trace: Trace) -> float:
+        """Extract accuracy from trace by parsing tool_output (matching old_distill)."""
+        for turn in trace:
+            try:
+                # Look for accuracy in tool_output (where LightGBM results are stored)
+                tool_output = turn.get("tool_output", "")
+                if "Accuracy" in tool_output:
+                    # Extract accuracy using regex: {'Accuracy': 0.965034965034965}
+                    match = re.search(r"'Accuracy': ([0-9.]+)", tool_output)
+                    if match:
+                        return float(match.group(1))
+            except Exception:
+                continue
+        return 0.0  # No accuracy found
+
+    def _get_distillation_config(self) -> Dict[str, Any]:
+        """Get configuration for distillation."""
+        return {
+            "num_traces": 100,
+            "accuracy_threshold": 0.9,
+            "batch_size": self.config.get("batch_size", 4),
+            "learning_rate": self.config.get("lr", 5e-5),
+            "use_bitsandbytes": self.config.get("use_bitsandbytes", False)
+        }
+    
+    def _get_cache_file_path(self, teacher_model_id: str, num_traces: int) -> str:
+        """Generate cache file path for teacher traces."""
+        model_name_safe = teacher_model_id.replace("/", "_")
+        return f"teacher_{num_traces}_traces_{model_name_safe}.json"
+    
+    def _load_cached_traces(self, traces_file_path: str) -> Tuple[List[Trace], List[Any], List[float]]:
+        """Load teacher traces from cache file."""
+        print(f" Loading existing teacher traces from {traces_file_path}")
+        with open(traces_file_path, 'r') as f:
+            teacher_data = json.load(f)
+        traces = teacher_data['traces']
+        rl_inputs = teacher_data['rl_inputs']  
+        rewards = teacher_data['rewards']
+        print(f"✅ Loaded {len(traces)} traces from file")
+        return traces, rl_inputs, rewards
+    
+    def _create_teacher_agent(self, teacher_model_id: str):
+        """Create teacher agent with same tools as student."""
+        print(f" Creating teacher model ({teacher_model_id})...")
+        teacher_model = TransformersModel(model_id=teacher_model_id)
+
+        # Set chat template if needed
+        if teacher_model.tokenizer.chat_template is None:
+            teacher_model.tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '<|user|>\\n' + message['content'] + '<|end|>\\n' }}{% elif message['role'] == 'system' %}{{ '<|system|>\\n' + message['content'] + '<|end|>\\n' }}{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\\n'  + message['content'] + '<|end|>\\n' }}{% endif %}{% endfor %}"
+
+        # Get student's original tool functions (not wrapped tool objects)
+        # This preserves the original function's import context like old_distill approach
+        student_tools = []
+        for _, tool_obj in self.agent_adapter.agent.tools.items():
+            # Try to get the original function from the tool object
+            if hasattr(tool_obj, 'func'):
+                student_tools.append(tool_obj.func)  # Get original function
+            else:
+                student_tools.append(tool_obj)  # Fallback to tool object
+
+        print(f" Teacher will use the same {len(student_tools)} tools as student: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in student_tools]}")
+
+        # Create teacher agent with original tool functions (like old_distill approach)
+        teacher_agent = CodeAgent(tools=student_tools, model=teacher_model, max_steps=1)
+        teacher_adapter = SmolAgentAdapter(agent=teacher_agent, config={})
+        print("✅ Teacher agent created")
+
+        return teacher_adapter
+    
+    def _collect_teacher_traces(self, teacher_adapter, num_traces: int, dataset: List[Dict[str, Any]]) -> Tuple[List[Trace], List[Any], List[float]]:
+        """Collect traces from teacher model."""
+        print(f" Collecting {num_traces} traces from teacher model...")
+        traces, rl_inputs, rewards = [], [], []
+        
+        # Use provided dataset queries
+        if dataset is None:
+            raise ValueError("No dataset provided.")
+        
+        queries = [item["query"] for item in dataset]
+        
+        for i in range(num_traces):
+            query = queries[i % len(queries)]  # Cycle through available queries
+            print(f"    Trace {i+1}/{num_traces}")
+            try:
+                trace, rl_input, _ = teacher_adapter.run(query)
+                
+                # Calculate reward using direct extraction (matching old_distill approach)
+                accuracy = self._extract_accuracy_from_trace(trace)
+                
+                traces.append(trace)
+                rl_inputs.append(rl_input)
+                rewards.append(accuracy)
+                print(f"       Reward: {accuracy:.3f}")
+            except Exception as e:
+                print(f"    ❌ Error collecting trace {i+1}: {e}")
+                continue
+        
+        return traces, rl_inputs, rewards
+    
+    def _save_traces_to_cache(self, traces_file_path: str, traces: List[Trace], rl_inputs: List[Any], rewards: List[float]) -> None:
+        """Save teacher traces to cache file."""
+        print(f"💾 Saving traces to {traces_file_path}")
+        with open(traces_file_path, 'w') as f:
+            json.dump({
+                "traces": traces,
+                "rewards": rewards,
+                "rl_inputs": rl_inputs
+            }, f, indent=2, default=str)
+        print(f"✅ Saved {len(traces)} teacher traces to file")
+    
+    def _filter_high_quality_traces(self, traces: List[Trace], rl_inputs: List[Any], rewards: List[float], accuracy_threshold: float) -> List[Any]:
+        """Filter traces based on accuracy threshold."""
+        print(f"\n Filtering high-quality traces (accuracy > {accuracy_threshold})...")
+        filtered_rl_inputs = []
+        
+        for trace, rl_input, _ in zip(traces, rl_inputs, rewards):
+            # Use the same extraction approach as old_distill (always re-extract from trace)
+            actual_accuracy = self._extract_accuracy_from_trace(trace)
+            if actual_accuracy > accuracy_threshold:
+                filtered_rl_inputs.append(rl_input)
+        
+        print(f"✅ Filtered {len(filtered_rl_inputs)}/{len(traces)} high-quality traces")
+        return filtered_rl_inputs
+    
+    def _train_student_with_traces(self, filtered_rl_inputs: List[Any], batch_size: int, learning_rate: float, use_bitsandbytes: bool) -> None:
+        """Train student model with filtered teacher traces."""
+        print(f"\n🎓 Starting distillation training on student model...")
+        print(f"   Using {len(filtered_rl_inputs)} high-quality teacher traces")
+        
+        # Create supervised learning module
+        distill_config = {
+            "lr": learning_rate,
+            "batch_size": batch_size, 
+            "epochs": 1,
+            "max_grad_norm": 1.0,
+            "use_bitsandbytes": use_bitsandbytes,
+            "lora_config": self.config.get("lora_config"),
+        }
+        
+        distill_module = SupervisedAlgorithm(
+            initial_policy=self.learning_module.policy,
+            config=distill_config
+        )
+        
+        # Train in batches
+        for i in range(0, len(filtered_rl_inputs), batch_size):
+            batch_end = min(i + batch_size, len(filtered_rl_inputs))
+            batch_rl_inputs = filtered_rl_inputs[i:batch_end]
+            
+            batch_num = i // batch_size + 1
+            total_batches = (len(filtered_rl_inputs) + batch_size - 1) // batch_size
+            print(f"      Processing batch {batch_num}/{total_batches} (traces {i+1}-{batch_end})")
+            
+            try:
+                distill_module.train_step(batch_rl_inputs)
+            except Exception as e:
+                print(f"      ⚠️ Error processing batch {batch_num}: {e}")
+                # Try individual traces if batch fails
+                for j, single_rl_input in enumerate(batch_rl_inputs):
+                    try:
+                        distill_module.train_step([single_rl_input])
+                    except Exception as e2:
+                        print(f"         ⚠️ Error processing individual trace {i+j+1}: {e2}")
+                        continue
+
+    # Distill Knowledge from Teacher to Student
+    def distill(self, dataset: List[Dict[str, Any]], teacher_model_id: str) -> None:
+        """
+        Distill knowledge from a teacher model to this Brain's student model.
+        
+        This method handles the complete distillation pipeline:
+        1. Creates a teacher agent with the same tools as the student
+        2. Collects execution traces from the teacher using the provided dataset
+        3. Filters high-quality traces (accuracy > 90%)
+        4. Trains the student model using supervised learning
+        
+        Args:
+            dataset: Training dataset with query/gold_answer pairs
+            teacher_model_id: HuggingFace model ID for the teacher model
+        """
+        print("\n🎓 Distillation mode activated")
+        
+        # Get configuration
+        config = self._get_distillation_config()
+        traces_file_path = self._get_cache_file_path(teacher_model_id, config["num_traces"])
+        
+        # === Step 1: Load or collect teacher traces ===
+        if os.path.exists(traces_file_path):
+            traces, rl_inputs, rewards = self._load_cached_traces(traces_file_path)
+        else:
+            # Collect new traces from teacher
+            teacher_adapter = self._create_teacher_agent(teacher_model_id)
+            traces, rl_inputs, rewards = self._collect_teacher_traces(teacher_adapter, config["num_traces"], dataset)
+            self._save_traces_to_cache(traces_file_path, traces, rl_inputs, rewards)
+            
+            # Clear teacher model from GPU memory after traces are collected
+            del teacher_adapter
+            torch.cuda.empty_cache()
+            gc.collect()
+            print("🧹 Teacher model cleared from GPU memory")
+        
+        # === Step 2: Filter high-quality traces ===
+        filtered_rl_inputs = self._filter_high_quality_traces(traces, rl_inputs, rewards, config["accuracy_threshold"])
+        
+        # === Step 3: Train student model ===
+        if len(filtered_rl_inputs) == 0:
+            print("⚠️ No high-quality traces found for distillation")
+            return
+        
+        self._train_student_with_traces(
+            filtered_rl_inputs, 
+            config["batch_size"], 
+            config["learning_rate"], 
+            config["use_bitsandbytes"]
+        )
+        
+        print("✅ Distillation complete! Student model pre-trained with teacher knowledge")
+        print("\n Starting regular training with RL...")
