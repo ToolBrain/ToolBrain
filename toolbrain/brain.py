@@ -8,9 +8,8 @@ It automatically detects the agent type and uses the appropriate adapter.
 import gc
 import json
 import os
-import re
 from collections import deque
-from typing import Any, List, Dict, Union, Optional, Callable, Tuple
+from typing import Any, List, Dict, Union, Tuple
 
 import numpy as np
 
@@ -354,20 +353,6 @@ class Brain:
         return examples
     
 
-    def _extract_accuracy_from_trace(self, trace: Trace) -> float:
-        """Extract accuracy from trace by parsing tool_output (matching old_distill)."""
-        for turn in trace:
-            try:
-                # Look for accuracy in tool_output (where LightGBM results are stored)
-                tool_output = turn.get("tool_output", "")
-                if "Accuracy" in tool_output:
-                    # Extract accuracy using regex: {'Accuracy': 0.965034965034965}
-                    match = re.search(r"'Accuracy': ([0-9.]+)", tool_output)
-                    if match:
-                        return float(match.group(1))
-            except Exception:
-                continue
-        return 0.0  # No accuracy found
 
     def _get_distillation_config(self) -> Dict[str, Any]:
         """Get configuration for distillation."""
@@ -439,10 +424,17 @@ class Brain:
             print(f"    Trace {i+1}/{num_traces}")
             try:
                 trace, rl_input, _ = teacher_adapter.run(query)
-                
-                # Calculate reward using direct extraction (matching old_distill approach)
-                accuracy = self._extract_accuracy_from_trace(trace)
-                
+
+                # Calculate reward using same function as student (for consistency)
+                if dataset:
+                    gold_answer = dataset[i % len(dataset)].get("gold_answer")
+                    if gold_answer is not None:
+                        accuracy = self.reward_func(trace, gold_answer=gold_answer)
+                    else:
+                        accuracy = self.reward_func(trace)
+                else:
+                    accuracy = self.reward_func(trace)
+
                 traces.append(trace)
                 rl_inputs.append(rl_input)
                 rewards.append(accuracy)
@@ -464,17 +456,27 @@ class Brain:
             }, f, indent=2, default=str)
         print(f"✅ Saved {len(traces)} teacher traces to file")
     
-    def _filter_high_quality_traces(self, traces: List[Trace], rl_inputs: List[Any], rewards: List[float], accuracy_threshold: float) -> List[Any]:
-        """Filter traces based on accuracy threshold."""
-        print(f"\n Filtering high-quality traces (accuracy > {accuracy_threshold})...")
+    def _filter_high_quality_traces(self, traces: List[Trace], rl_inputs: List[Any], rewards: List[float], accuracy_threshold: float, dataset: List[Dict[str, Any]] = None) -> List[Any]:
+        """Filter traces based on quality threshold using reward function."""
+        print(f"\n Filtering high-quality traces (quality > {accuracy_threshold})...")
         filtered_rl_inputs = []
-        
-        for trace, rl_input, _ in zip(traces, rl_inputs, rewards):
-            # Use the same extraction approach as old_distill (always re-extract from trace)
-            actual_accuracy = self._extract_accuracy_from_trace(trace)
-            if actual_accuracy > accuracy_threshold:
+
+        for i, (trace, rl_input, _) in enumerate(zip(traces, rl_inputs, rewards)):
+            # Use reward function consistently (works with any tool type)
+            if dataset:
+                # Use gold answer from dataset if available
+                gold_answer = dataset[i % len(dataset)].get("gold_answer")
+                if gold_answer is not None:
+                    quality_score = self.reward_func(trace, gold_answer=gold_answer)
+                else:
+                    quality_score = self.reward_func(trace)
+            else:
+                # No dataset or gold answer, use reward function without gold answer
+                quality_score = self.reward_func(trace)
+
+            if quality_score > accuracy_threshold:
                 filtered_rl_inputs.append(rl_input)
-        
+
         print(f"✅ Filtered {len(filtered_rl_inputs)}/{len(traces)} high-quality traces")
         return filtered_rl_inputs
     
@@ -556,7 +558,7 @@ class Brain:
             print("🧹 Teacher model cleared from GPU memory")
         
         # === Step 2: Filter high-quality traces ===
-        filtered_rl_inputs = self._filter_high_quality_traces(traces, rl_inputs, rewards, config["accuracy_threshold"])
+        filtered_rl_inputs = self._filter_high_quality_traces(traces, rl_inputs, rewards, config["accuracy_threshold"], dataset)
         
         # === Step 3: Train student model ===
         if len(filtered_rl_inputs) == 0:
