@@ -69,66 +69,65 @@ def calculate_power(base: float, exponent: int) -> float:
     return base ** exponent
 
 # --- 2. Prepare Training Data ---
+
 training_dataset = [
     {
-        "query": "Use the add tool to calculate 15 + 27",
+        "query": "Use the add tool to calculate 15 + 27, then provide the final answer",
         "gold_answer": "42"
     },
     {
-        "query": "What is 8 multiplied by 7?",
+        "query": "What is 8 multiplied by 7? Use the multiply tool and provide the final answer",
         "gold_answer": "56"
     },
     {
-        "query": "Calculate 2 to the power of 5",
-        "gold_answer": "32.0"
+        "query": "Calculate 2 to the power of 5 using the calculate_power tool, then provide the final answer",
+        "gold_answer": "32"
     },
     {
-        "query": "Add 100 and 200, then show the result",
+        "query": "Add 100 and 200 using the add tool, then provide the final answer",
         "gold_answer": "300"
     }
 ]
 
 def reward_simple_exact_match(trace: Trace, **kwargs: Any) -> float:
-    """
-    Enhanced exact match reward function.
-    
-    Checks multiple sources for the correct answer:
-    1. parsed_completion["final_answer"] (preferred)
-    2. action_output (numeric values from final_answer calls)
-    3. tool_output "Last output from code snippet" (fallback)
-    
-    Returns 1.0 for exact match, 0.0 otherwise.
-    """
+    """Simple reward function - check if final answer matches gold answer."""
     gold_answer = kwargs.get("gold_answer")
+
     if gold_answer is None:
         return 0.0
-    
-    gold_str = str(gold_answer).strip()
-    
-    for turn in reversed(trace):
-        # Method 1: Check parsed final_answer (most reliable)
-        parsed = turn.get("parsed_completion", {})
-        if parsed and parsed.get("final_answer"):
-            final_answer = str(parsed["final_answer"]).strip()
-            if final_answer == gold_str:
-                return 1.0
-        
-        # Method 2: Check action_output (for successful final_answer calls)
+
+    # Look for any turn that has an answer
+    for turn in trace:
         action_output = turn.get("action_output")
-        if action_output is not None and str(action_output).strip() == gold_str:
-            return 1.0
-            
-        # Method 3: Check tool_output for "Last output from code snippet"
-        tool_output = turn.get("tool_output", "")
-        if "Last output from code snippet:" in tool_output:
-            # Extract the value after "Last output from code snippet:"
-            import re
-            match = re.search(r"Last output from code snippet:\n(.+?)(?:\n|$)", tool_output)
-            if match:
-                output_value = match.group(1).strip()
-                if output_value == gold_str:
+        if action_output is not None:
+            # Convert both to strings for comparison
+            answer_str = str(action_output).strip()
+            gold_str = str(gold_answer).strip()
+
+            # Check for direct numeric match
+            try:
+                if float(answer_str) == float(gold_str):
                     return 1.0
-    
+            except (ValueError, TypeError):
+                pass
+
+            # Check for exact string match
+            if answer_str == gold_str:
+                return 1.0
+
+            # Check if the answer is embedded in a sentence
+            # E.g., "The result of adding 15 and 27 is 42." should match gold_answer="42"
+            import re
+            # Extract numbers from the text
+            numbers = re.findall(r'\b\d+(?:\.\d+)?\b', answer_str)
+            for num_str in numbers:
+                try:
+                    if float(num_str) == float(gold_str):
+                        return 1.0
+                except (ValueError, TypeError):
+                    if num_str == gold_str:
+                        return 1.0
+
     return 0.0
 
 def main():
@@ -214,7 +213,7 @@ def main():
     # Distill knowledge from teacher to student
     # Teacher automatically uses the same tools as the student
     brain.distill(
-        training_dataset=training_dataset, 
+        dataset=training_dataset,
         teacher_model_id="Qwen/Qwen2.5-7B-Instruct"
     )
 
