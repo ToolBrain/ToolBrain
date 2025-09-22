@@ -12,6 +12,30 @@ class ToolRetriever:
     def __init__(self):
         pass
 
+    def select_relevant_tools(self, query: str, tools_list: list, llm=None, topic='general', guidelines="") -> list:
+        """
+        Select relevant tools from smolagents tools list.
+        
+        Args:
+            query: User's query
+            tools_list: List of smolagents Tool objects
+            llm: Optional LLM instance
+            topic: Domain topic for expert selection
+            guidelines: Custom selection guidelines
+            
+        Returns:
+            List of selected Tool objects
+        """
+        if not tools_list:
+            return []
+            
+        # Use existing prompt_based_retrieval logic
+        resources = {"tools": tools_list}
+        selected = self.prompt_based_retrieval(query, resources, llm, topic, guidelines)
+        
+        # Return the actual tool objects
+        return selected.get("tools", [])
+
     def prompt_based_retrieval(self, query: str, resources: dict, llm=None, topic='bio medial', guidelines="") -> dict:
         """Use a prompt-based approach to retrieve the most relevant resources for a query.
 
@@ -53,7 +77,7 @@ class ToolRetriever:
         """.format(topic=topic, 
         query=query, 
         tools=self._format_resources_for_prompt(resources.get("tools", [])),
-        guideline=guideline or "1. Focus on relevance to the query.\n2. Be comprehensive in the selection.\n3. Avoid including irrelevant items.")
+        guidelines=guidelines or "1. Focus on relevance to the query.\n2. Be comprehensive in the selection.\n3. Avoid including irrelevant items.")
 
         # Use the provided LLM or create a new one
         if llm is None:

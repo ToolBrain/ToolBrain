@@ -1,24 +1,23 @@
 """
-ToolBrain Training Example - Simplified API
+ToolBrain Training Example
 
-This script demonstrates the new, simplified ToolBrain API.
-1. Define a configuration dictionary.
-2. Pass the config to the Brain.
-3. Call brain.train().
+This script demonstrates the new, ultra-simplified ToolBrain API:
+1. Create agent with create_agent() or manually
+2. Create brain with Brain() constructor (all parameters as keywords)
+3. Train with explicit, self-documenting parameters
+
 """
 import os
 import sys
 from dotenv import load_dotenv
 
-from peft import LoraConfig
-
 load_dotenv()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from smolagents import CodeAgent, TransformersModel, tool, ChatMessage, MessageRole
-from toolbrain import Brain
-from toolbrain.rewards import reward_exact_match, reward_llm_judge_via_ranking
+from smolagents import tool
+from toolbrain import create_agent, Brain
+from toolbrain.rewards import reward_exact_match
 
 # --- 1. Define Tools and Reward Function (User-defined) ---
 @tool
@@ -63,102 +62,129 @@ training_dataset = [
 ]
 
 def main():
-    print("🧠 ToolBrain Flexible Training Example")
+    print("🧠 ToolBrain Training Example")
     print("=" * 60)
-
-    print("🤖 User is creating their own agent...")
    
-    print("📥 Initializing TransformersModel...")
-    trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct")
-    print("✅ TransformersModel initialized.")
-    
-    # Get the tokenizer from inside the model
-    tokenizer = trainable_model.tokenizer
-    
-    # If the tokenizer does not yet have a chat template, set a default one
-    if tokenizer.chat_template is None:
-        print("🔧 Setting a default chat template for the tokenizer.")
-        # This is a very common and safe template
-        tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '<|user|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'system' %}{{ '<|system|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\n'  + message['content'] + '<|end|>\n' }}{% endif %}{% endfor %}"
-
-    print("🔧 Creating CodeAgent...")
-    my_agent = CodeAgent(
-        tools=[add, multiply],
-        model=trainable_model
+    # 1. Create agent 
+    agent = create_agent(
+        model_id="Qwen/Qwen2.5-0.5B-Instruct",
+        tools=[add, multiply]  
+        # use_unsloth=True (optional, default False)
     )
+    
     print("✅ Agent created.")
 
-    # --- 4. Initialize Brain and Train ---
-    # User only needs to pass their agent to Brain
+    # 2. Create Brain 
+
+    # === TYPICAL USAGE: Only 2 key parameters ===
     brain = Brain(
-        agent=my_agent,
-        reward_func=reward_exact_match,
-        learning_algorithm="GRPO",
-        config={
-            "epsilon": 0.2, # clipping parameter
-            "beta": 0.04, # KL divergence penalty coefficient
-            "opt_steps": 3, # Number of GRPO optimization steps per batch
-            "lr": 1e-5, # Learning rate for optimizer
-            "max_grad_norm": 1.0,
-            "chunk_len": 128, # If not None, get_per_token_logps will process in chunks
-            "num_group_members": 2,  # The number of group members used for GRPO training steps
-            "lora_config": LoraConfig( # If set, the RL will perform LoRA finetuning instead of full fine-tuning
-                                    r=8,  # LoRA rank
-                                    lora_alpha=16,  # scaling
-                                    target_modules=["q_proj", "v_proj"],  # the modules to apply LoRA
-                                    lora_dropout=0.1,
-                                    bias="none",
-                                    task_type="CAUSAL_LM",  # or "SEQ_2_SEQ_LM" for encoder-decoder
-                                )
-        }
+        agent,                          # Agent instance  
+        algorithm="GRPO"                # Algorithm choice
+        # learning_rate=3e-5 (default)
+        # epsilon=0.2 (default)  
+        # num_group_members=10 (default)
+        # batch_size=1 (default)
+        # max_grad_norm=1.0 (default)
+        # use_bitsandbytes=False (default)
+        # reward_func=None -> exact_match (default)
+        # enable_tool_retrieval=False (default)
     )
 
-    brain.train(training_dataset)
+    # User only needs to specify what they want to change
 
-    # Get the trained agent
-    trained_agent = brain.get_agent()
-    print("\n🤖 Agent after training is ready to use.")
+    # === DEMO: Override just 1-2 key parameters ===
+    brain_custom = Brain(
+        agent,
+        algorithm="GRPO",
+        learning_rate=1e-5,             # Override learning rate
+        num_group_members=2             # And group size for faster
+    )
 
+    # 3. Demo other algorithms
 
-# def main():
-#     print("🧠 ToolBrain Training Example with LLM-as-a-Judge")
-#     print("=" * 60)
-
-#     print("🤖 Initializing agent to be trained...")
-#     trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct")
+    # DPO example - only override algorithm-specific parameters
+    dpo_brain = Brain(
+        agent,
+        algorithm="DPO",                # Different algorithm
+        beta=0.04                       # Only override DPO-specific parameter
+        # All others use defaults: learning_rate=3e-5, num_group_members=10, etc.
+    )
     
-#     tokenizer = trainable_model.tokenizer
-#     if tokenizer.chat_template is None:
-#         print("🔧 Setting a default chat template for the tokenizer.")
-#         tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '<|user|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'system' %}{{ '<|system|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\n'  + message['content'] + '<|end|>\n' }}{% endif %}{% endfor %}"
+    # Supervised example
+    supervised_brain = Brain(
+        agent,
+        algorithm="Supervised",         # Supervised learning
+        learning_rate=5e-5
+    )
 
-#     my_agent = CodeAgent(
-#         tools=[add, multiply],
-#         model=trainable_model
-#     )
-#     print("✅ Agent created.")
+    # === DEMO: Tool Retrieval Feature ===
+    retrieval_brain = Brain(
+        agent,
+        algorithm="GRPO",
+        learning_rate=1e-5,
+        num_group_members=2,
+        enable_tool_retrieval=True,      # Enable intelligent tool filtering
+        retrieval_topic="mathematics",   # Domain for tool selection
+        retrieval_guidelines="Select only tools needed for mathematical calculations"
+    )
 
-#     try:
-#         brain = Brain(
-#             agent=my_agent,
-#             reward_func=reward_llm_judge_via_ranking, 
-#             learning_algorithm="GRPO",
-#             rl_config={"lr": 1e-5},
-#             brain_config={"num_group_members": 3}
-#         )
-        
-#         brain.train(
-#             dataset=training_dataset,
-#             judge_model="gemini/gemini-2.5-pro" 
-#         )
-        
-#         trained_agent = brain.get_agent()
-#         print("\n🤖 Agent after training is ready to use.")
+    # 4. Train with the GRPO brain (using brain_custom for faster)
+    print("\n🚀 Starting training...")
+    
+    brain_custom.train(training_dataset, num_iterations=1)
+    
+    # 5. Get trained agent
+    print("\n🎉 Training completed!")
+    trained_agent = brain_custom.get_agent()
+    print("✅ Trained agent is ready to use!")
 
-#     except Exception as e:
-#         print(f"\n❌ An error occurred: {e}")
-#         import traceback
-#         traceback.print_exc()
+    # === DEMO: Save/Load Functionality ===
+    print("\n💾 Save/Load Demo")
+    print("-" * 30)
+    
+    # Save the trained model
+    model_save_path = "./saved_math_model"
+    print(f"Saving model to: {model_save_path}")
+    brain_custom.save(model_save_path)
+    
+    # Load the saved model back
+    print(f"Loading model from: {model_save_path}")
+    loaded_agent = Brain.load_agent(
+        model_dir=model_save_path,
+        base_model_id="Qwen/Qwen2.5-0.5B-Instruct",  # Same as original
+        tools=[add, multiply]  # Same tools as original
+    )
+    
+    print("✅ Model saved and loaded successfully!")
+    
+    # === DEMO: Continue Training ===
+    print("\n🔄 Continue Training Demo")  
+    print("-" * 30)
+    
+    # Load model and continue training
+    brain_continued = Brain.load_and_continue_training(
+        model_dir=model_save_path,
+        base_model_id="Qwen/Qwen2.5-0.5B-Instruct",
+        tools=[add, multiply],
+        algorithm="GRPO",
+        learning_rate=1e-6  # Lower learning rate for fine-tuning
+    )
+    
+    # Additional training data
+    more_training_data = [
+        {
+            "query": "Calculate 15 plus 25", 
+            "gold_answer": "40"
+        },
+        {
+            "query": "What's 9 times 7?",
+            "gold_answer": "63" 
+        }
+    ]
+    
+    print("Training more steps...")
+    brain_continued.train(more_training_data, num_iterations=1)
+    print("✅ Continued training completed!")
 
 if __name__ == "__main__":
     main()

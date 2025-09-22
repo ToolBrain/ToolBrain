@@ -2,10 +2,13 @@ import platform
 if platform.system() != "Darwin":  # Darwin means macOS
     try:
         from unsloth import FastLanguageModel
+        UNSLOTH_AVAILABLE = True
     except ImportError:
         FastLanguageModel = None
+        UNSLOTH_AVAILABLE = False
 else:
     FastLanguageModel = None
+    UNSLOTH_AVAILABLE = False
 
 import logging
 from typing import Optional, Dict, Any

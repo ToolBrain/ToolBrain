@@ -1,27 +1,72 @@
 """
 ToolBrain - A framework for training LLM-powered agents to use tools effectively.
 
-ToolBrain provides a structured approach to improving agent performance through
-reinforcement learning, with built-in support for execution trace capture,
-reward function evaluation, and RL algorithm integration.
+Clean and simple API with separated concerns:
 
-The framework uses the Adapter pattern for clean separation of concerns.
+# === SIMPLIFIED API === 
+from toolbrain import create_agent, Brain
+
+# 1. Create agent with tools
+agent = create_agent("microsoft/DialoGPT-medium", tools)
+
+# 2. Create brain with explicit parameters  
+brain = Brain(agent, algorithm="GRPO", learning_rate=1e-4, epsilon=0.2)
+brain.train(dataset)
+
+# 3. Save and load models
+brain.save("./my_model")
+loaded_agent = Brain.load_agent("./my_model", "microsoft/DialoGPT-medium", tools)
+
+# Clean separation: Agent handles execution, Brain handles training strategy!
 """
 
+# Main factory functions - primary API
+from .factory import (
+    create_agent,
+    create_optimized_model,
+)
+
+# Core classes 
 from .brain import Brain
+from .config import get_config, GRPOConfig, DPOConfig, SupervisedConfig, BaseConfig
+from .rewards import (
+    reward_exact_match,
+    reward_tool_execution_success,
+    reward_llm_judge_via_ranking,
+    create_reward_function
+)
+
+# Legacy/Advanced imports for backward compatibility
 from .core_types import Trace, TraceStep
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
-from .rewards import RewardFunctionWrapper, create_reward_function
-from .config import get_default_config
 
 __version__ = "0.2.0"
+
+# Public API - what most users should import
 __all__ = [
-    "Brain", 
-    "Trace", 
-    "TraceStep",
-    "BaseAgentAdapter",
-    "SmolAgentAdapter",
-    "RewardFunctionWrapper",
+    # === PRIMARY API ===
+    "Brain",               
+    
+    # === FACTORY FUNCTIONS ===
+    "create_agent",        # Create agent with tools
+    "create_optimized_model",  # Create UnslothModel or TransformersModel
+    
+    # === CONFIGURATION ===
+    "get_config",
+    "GRPOConfig", 
+    "DPOConfig",
+    "SupervisedConfig",
+    "BaseConfig",
+    
+    # === REWARD FUNCTIONS ===
+    "reward_exact_match",
+    "reward_tool_execution_success", 
+    "reward_llm_judge_via_ranking",
     "create_reward_function",
-    "get_default_config"
-] 
+    
+    # === ADVANCED/LEGACY ===
+    "Trace",
+    "TraceStep",
+    "BaseAgentAdapter", 
+    "SmolAgentAdapter",
+]

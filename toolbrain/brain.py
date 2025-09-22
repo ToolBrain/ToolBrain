@@ -8,19 +8,24 @@ It automatically detects the agent type and uses the appropriate adapter.
 import gc
 import json
 import os
+import re
+import contextlib
 from collections import deque
-from typing import Any, List, Dict, Union, Tuple
+from typing import Any, List, Dict, Union, Tuple, Optional, Callable
+from pathlib import Path
+import logging
 
 import numpy as np
 
 from .learning.supervised.algo import SupervisedAlgorithm
-from .rewards import RewardFunctionWrapper
+from .rewards import RewardFunctionWrapper, create_reward_function, reward_exact_match
 from .core_types import Trace, RewardFunction, BatchRewardFunction
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
 from .learning.dpo.algo import DPOAlgorithm
 from .learning.dpo.utils import make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
+from .config import BaseConfig, get_config, GRPOConfig, DPOConfig, SupervisedConfig
 from smolagents import CodeAgent, ChatMessage, MessageRole, TransformersModel
 import torch
 from textwrap import dedent
@@ -31,77 +36,254 @@ SupervisedALiasNames = ["Supervised", "supervised", "supervise"]
 
 class Brain:
     """
-    The flexible and intelligent trainer for ToolBrain agents.
-
-    Users provide their pre-configured agent, and the Brain automatically
-    handles the complexities of trace capture and RL training.
+    The simple and powerful trainer for ToolBrain agents.
+    
+    Just one constructor with all important parameters as keyword arguments.
+    No need to understand config classes or factory methods.
     """
     
     def __init__(
         self,
-        agent: Any, # Any agent instance
-        reward_func: Union[RewardFunction, BatchRewardFunction, RewardFunctionWrapper],
-        config: Dict[str, Any],
-        learning_algorithm: str = "GRPO",
+        agent: Any,
+        *,  # Force all parameters after agent to be keyword-only
+        # === Core Training Settings ===
+        algorithm: str = "GRPO", 
+        learning_rate: float = 3e-5,
+        batch_size: int = 1,
+        
+        # === GRPO Specific Parameters ===
+        epsilon: float = 0.2,          # GRPO clip ratio
+        num_group_members: int = 10,   # Number of traces per training step
+        
+        # === DPO Specific Parameters ===  
+        beta: float = 0.1,             # DPO temperature parameter
+        loss_type: str = "sigmoid",    # DPO loss type
+        label_smoothing: float = 0.0,  # DPO label smoothing
+        
+        # === Optimization Settings ===
+        max_grad_norm: float = 1.0,    # Gradient clipping
+        use_bitsandbytes: bool = False, # Memory optimization
+        
+        # === Reward & Tools ===
+        reward_func: Optional[Union[RewardFunction, BatchRewardFunction, RewardFunctionWrapper]] = None,
+        enable_tool_retrieval: bool = False,
+        retrieval_topic: str = "general",       # Topic for tool retrieval
+        retrieval_guidelines: str = "",         # Custom guidelines for tool selection
+        
+        # === Advanced (Optional) ===
+        config: Optional[BaseConfig] = None  # For power users only
     ):
         """
-        Initializes the Brain by automatically selecting the correct adapter for the agent.
+        Initialize Brain with simple, self-documenting parameters.
+        
+        Args:
+            agent: Pre-configured agent instance
+            
+            # === Core Training Settings ===
+            algorithm: Learning algorithm ("GRPO", "DPO", "Supervised") 
+            learning_rate: Learning rate for optimization
+            batch_size: Batch size for training
+            
+            # === GRPO Parameters (only used if algorithm="GRPO") ===
+            epsilon: Clip ratio for GRPO (typically 0.1-0.3)
+            num_group_members: Number of traces collected per training step
+            
+            # === DPO Parameters (only used if algorithm="DPO") ===
+            beta: Temperature parameter for DPO (typically 0.1-0.5)
+            loss_type: DPO loss function ("sigmoid", "hinge")  
+            label_smoothing: Label smoothing factor
+            
+            # === Optimization ===
+            max_grad_norm: Gradient clipping threshold
+            use_bitsandbytes: Enable memory-efficient training
+            
+            # === Reward & Tools ===
+            reward_func: Reward function (defaults to exact match)
+            enable_tool_retrieval: Enable intelligent tool filtering
+            retrieval_topic: Domain/topic for tool retrieval (e.g., "bio medical", "data science")
+            retrieval_guidelines: Custom guidelines for tool selection
+            
+        Example:
+            >>> # Simple GRPO training
+            >>> brain = Brain(agent, algorithm="GRPO", learning_rate=1e-4, epsilon=0.2)
+            >>> 
+            >>> # DPO training with custom parameters
+            >>> brain = Brain(agent, algorithm="DPO", learning_rate=3e-5, beta=0.3)
+            >>> 
+            >>> # Supervised training
+            >>> brain = Brain(agent, algorithm="Supervised", learning_rate=5e-5)
+            >>>
+            >>> # Training with tool retrieval
+            >>> brain = Brain(agent, algorithm="GRPO", learning_rate=1e-4,
+            ...              enable_tool_retrieval=True, retrieval_topic="data science")
         """
+        print(f"🧠 Initializing Brain with {algorithm} algorithm...")
+        
+        # Store core settings
+        self.agent = agent
+        self.algorithm = algorithm
+        self.batch_size = batch_size
+        
+        # Create algorithm-specific config automatically
+        if config is None:
+            config = get_config(algorithm)
+            
+        # Apply all parameters to config
+        config.learning_rate = learning_rate
+        config.batch_size = batch_size
+        config.max_grad_norm = max_grad_norm
+        config.use_bitsandbytes = use_bitsandbytes
+        
+        # Apply algorithm-specific parameters
+        if algorithm.upper() == "GRPO":
+            config.epsilon = epsilon
+            config.num_group_members = num_group_members
+            print(f"   GRPO settings: learning_rate={learning_rate}, epsilon={epsilon}, num_group_members={num_group_members}")
+            
+        elif algorithm.upper() == "DPO":
+            config.beta = beta
+            config.loss_type = loss_type
+            config.label_smoothing = label_smoothing
+            # DPO requires multiple traces
+            config.num_group_members = max(num_group_members, 2)  # At least 2 for comparison
+            print(f"   DPO settings: learning_rate={learning_rate}, beta={beta}, loss_type={loss_type}")
+            
+        elif algorithm.upper() == "SUPERVISED":
+            print(f"   Supervised settings: learning_rate={learning_rate}")
+            
+        else:
+            print(f"   ⚠️ Unknown algorithm '{algorithm}', using as-is")
+            
         self.config = config
         
-        # Auto-wrap reward function if needed
-        if isinstance(reward_func, RewardFunctionWrapper):
-            self.reward_func = reward_func
+        # Handle reward function
+        if reward_func is None:
+            reward_func = reward_exact_match
+            print("   Using default reward: exact_match")
+        
+        if not isinstance(reward_func, RewardFunctionWrapper):
+            reward_func = create_reward_function(reward_func)
+        self.reward_func = reward_func
+        
+        # Handle tool retrieval
+        self.enable_tool_retrieval = enable_tool_retrieval
+        self.retrieval_topic = retrieval_topic
+        self.retrieval_guidelines = retrieval_guidelines
+        
+        if enable_tool_retrieval:
+            self._setup_tool_retrieval()
+            print(f"   🔍 Tool retrieval enabled for topic: '{retrieval_topic}'")
         else:
-            self.reward_func = RewardFunctionWrapper(reward_func)
-            
-        self.learning_algorithm = learning_algorithm
+            self.retriever = None
         
         # Store original agent type for flexible return in get_agent()
         self.original_agent_type = type(agent)
         
-        print(f"🧠 Initializing Brain for agent of type '{self.original_agent_type.__name__}'...")
-
-        # --- "Adapter Factory" automatically ---
+        # Initialize adapter and algorithm
         self.agent_adapter = self._get_adapter_for_agent(agent)
-        print(f"   ✅ Using adapter: {type(self.agent_adapter).__name__}")
+        print(f"   Using adapter: {type(self.agent_adapter).__name__}")
         
-        # Get trainable model from adapter
-        trainable_model = self.agent_adapter.get_trainable_model()
+        # Get trainable model from adapter and setup training
+        self._setup_training()
         
-        # --- Initialize RL module ---
-        print(f"   - Initializing learning algorithm: {learning_algorithm}...")
-        if learning_algorithm in  GRPOALiasNames:
-            policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
-            self.learning_module = GRPOAlgorithm(
-                initial_policy=policy, 
-                config=config
-            )
-        elif learning_algorithm in DPOALiasNames:
-            policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
-            self.learning_module = DPOAlgorithm(
-                initial_policy=policy,
-                config=config
-            )
-        elif learning_algorithm in SupervisedALiasNames:
-            policy = Policy(llm=trainable_model.model, tokenizer=trainable_model.tokenizer)
-            self.learning_module = SupervisedAlgorithm(
-                initial_policy=policy,
-                config=config
-            )
-        else:
-            raise NotImplementedError(f"Algorithm '{learning_algorithm}' is not supported.")
-        print("   ✅ Learning module initialized.")
+        # Legacy compatibility
         self.reward_buffer = deque(maxlen=10)
         
-        print("\n✅ Brain is ready for training.")
+        print("✅ Brain initialization completed")
+
+    def _setup_tool_retrieval(self):
+        """Setup tool retrieval components."""
+        try:
+            from .retriever import ToolRetriever
+            self.retriever = ToolRetriever()
+            print(f"   ✅ Tool retriever initialized for '{self.retrieval_topic}' domain")
+        except ImportError as e:
+            print(f"   ❌ Could not import ToolRetriever: {e}")
+            print("   ❌ Tool retrieval will be disabled")
+            self.retriever = None
+            self.enable_tool_retrieval = False
+
+    def _setup_training(self):
+        """Setup training components."""
+        # Get trainable model from adapter
+        self.trainable_model = self.agent_adapter.get_trainable_model()
+        
+        # Create policy for RL
+        if hasattr(self.trainable_model, 'model') and hasattr(self.trainable_model, 'tokenizer'):
+            model = self.trainable_model.model
+            tokenizer = self.trainable_model.tokenizer
+        else:
+            model = self.trainable_model
+            tokenizer = getattr(self.trainable_model, 'tokenizer', None)
+            if tokenizer is None:
+                raise ValueError("Could not find tokenizer in the model")
+        
+        # Convert config to dict format for algorithms (backward compatibility)
+        config_dict = self.config.to_dict() if hasattr(self.config, 'to_dict') else vars(self.config)
+        
+        # Create and store policy
+        self.policy = Policy(llm=model, tokenizer=tokenizer)
+        
+        # Initialize the RL algorithm (maintain backward compatibility with learning_module)
+        if self.algorithm in GRPOALiasNames:
+            self.learning_module = GRPOAlgorithm(
+                initial_policy=self.policy,
+                config=config_dict
+            )
+        elif self.algorithm in DPOALiasNames:
+            self.learning_module = DPOAlgorithm(
+                initial_policy=self.policy,
+                config=config_dict
+            )
+        elif self.algorithm in SupervisedALiasNames:
+            self.learning_module = SupervisedAlgorithm(
+                initial_policy=self.policy,
+                config=config_dict
+            )
+        else:
+            raise ValueError(f"Unknown learning algorithm: {self.algorithm}")
+        
+        print(f"   ✅ Initialized {self.algorithm} algorithm")
+
+    def _retrieve_relevant_tools(self, query: str) -> List[Any]:
+        """
+        Use tool retriever to select relevant tools for the query.
+        
+        Args:
+            query: User's query/task
+            
+        Returns:
+            List of relevant Tool objects
+        """
+        if not self.enable_tool_retrieval or self.retriever is None:
+            return self.agent.tools
+        
+        try:
+            # Use retriever's direct method for smolagents tools
+            relevant_tools = self.retriever.select_relevant_tools(
+                query=query,
+                tools_list=self.agent.tools,
+                topic=self.retrieval_topic,
+                guidelines=self.retrieval_guidelines or "Select tools that are directly relevant to accomplishing the task."
+            )
+            
+            print(f"   🔍 Selected {len(relevant_tools)}/{len(self.agent.tools)} relevant tools: {[getattr(t, 'name', str(t)) for t in relevant_tools]}")
+            
+            return relevant_tools if relevant_tools else self.agent.tools
+            
+        except Exception as e:
+            print(f"   ⚠️ Tool retrieval failed: {e}")
+            print("   ℹ️ Falling back to using all available tools")
+            return self.agent.tools
 
     def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
         """
         Factory method to automatically select the appropriate adapter for the given agent.
         """
         if isinstance(agent_instance, CodeAgent):
-            return SmolAgentAdapter(agent=agent_instance, config=self.config)
+            # Convert config to dict format for adapter (backward compatibility)
+            config_dict = self.config.to_dict() if hasattr(self.config, 'to_dict') else vars(self.config)
+            return SmolAgentAdapter(agent=agent_instance, config=config_dict)
         # Future example:
         # elif isinstance(agent_instance, AutoGenAgent):
         #     return AutoGenAdapter(agent=agent_instance)
@@ -123,9 +305,9 @@ class Brain:
             print(f"\n--- Iteration {i+1}/{num_iterations} ---")
             
             for example in dataset:
-                if self.learning_algorithm in GRPOALiasNames or self.learning_algorithm in DPOALiasNames:
+                if self.algorithm in GRPOALiasNames or self.algorithm in DPOALiasNames:
                     query = example.get("query")
-                elif self.learning_algorithm in SupervisedALiasNames:
+                elif self.algorithm in SupervisedALiasNames:
                     query = example
                 self.train_step(query=query, reward_kwargs=example)
         
@@ -137,19 +319,44 @@ class Brain:
         raw_memory_collection: List[List[Any]] = []  # Collection of raw memory steps
         num_group_members = self.config.get("num_group_members", 10)
         print(f"  📊 Collecting {num_group_members} traces...")
-        for i in range(num_group_members):
-            try:
-                print(f"    📝 Trace {i + 1}/{num_group_members}")
-                trace, rl_input, raw_memory_steps = self.agent_adapter.run(query)
-                traces.append(trace)
-                rl_inputs.append(rl_input)
-                raw_memory_collection.append(raw_memory_steps)
-                torch.cuda.empty_cache()
-                gc.collect()
-            except Exception as e:
-                print(f"    ❌ Error during agent iteration: {e}")
-                continue
-
+        
+        # Store original tools and apply tool retrieval if enabled
+        original_tools = None
+        if self.enable_tool_retrieval:
+            print(f"  🔍 Retrieving relevant tools for query...")
+            relevant_tools = self._retrieve_relevant_tools(query)
+            
+            # Backup original tools (list)
+            original_tools = self.agent.tools.copy()
+            
+            # Use filtered tool objects
+            if relevant_tools and len(relevant_tools) < len(original_tools):
+                self.agent.tools = relevant_tools
+                print(f"  ✅ Temporarily using {len(relevant_tools)} filtered tools")
+            else:
+                print(f"  ℹ️ Using all {len(original_tools)} tools (no filtering applied)")
+        
+        try:
+            # Collect traces with filtered tools (if retrieval enabled)
+            for i in range(num_group_members):
+                try:
+                    print(f"    📝 Trace {i + 1}/{num_group_members}")
+                    trace, rl_input, raw_memory_steps = self.agent_adapter.run(query)
+                    traces.append(trace)
+                    rl_inputs.append(rl_input)
+                    raw_memory_collection.append(raw_memory_steps)
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                except Exception as e:
+                    print(f"    ❌ Error during agent iteration: {e}")
+                    continue
+        
+        finally:
+            # Always restore original tools if they were modified
+            if original_tools is not None:
+                self.agent.tools = original_tools
+                print(f"  🔄 Restored original {len(original_tools)} tools")
+                    
         # Compute rewards using batch scoring (supports both single and batch functions)
         print(f"  🎯 Computing rewards for {len(traces)} traces...")
         if self.reward_func.is_batch_function:
@@ -175,10 +382,10 @@ class Brain:
         """Executes a single training step for a given query."""
         print(f"\n🔄 Training step for query: '{query[:50]}...'")
         num_group_members = self.config.get("num_group_members", 10)
-        if num_group_members == 1 and self.learning_algorithm in DPOALiasNames:
-            raise NotImplementedError(f"Algorithm '{self.learning_algorithm}' requires num_group_members > 1!")
+        if num_group_members == 1 and self.algorithm in DPOALiasNames:
+            raise NotImplementedError(f"Algorithm '{self.algorithm}' requires num_group_members > 1!")
 
-        if self.learning_algorithm in GRPOALiasNames or  self.learning_algorithm in DPOALiasNames:
+        if self.algorithm in GRPOALiasNames or self.algorithm in DPOALiasNames:
             traces, rewards, rl_inputs = self.get_trace(query, reward_kwargs)
             # ✅ Update reward buffer
             self.reward_buffer.extend(rewards)
@@ -188,14 +395,14 @@ class Brain:
             if not traces:
                 print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
                 return
-        elif self.learning_algorithm in SupervisedALiasNames:
+        elif self.algorithm in SupervisedALiasNames:
             rl_inputs = query
 
-        if self.learning_algorithm in GRPOALiasNames:
+        if self.algorithm in GRPOALiasNames:
             print(f"  🧠 Running RL training step with {len(traces)} traces...")
             self.learning_module.train_step(rl_inputs, rewards)
             print(f"  ✅ RL training step completed")
-        elif self.learning_algorithm in DPOALiasNames:
+        elif self.algorithm in DPOALiasNames:
             print(f"  🧠 Sample chosen and rejected pairs from traces...")
             chosen_segments, rejected_segments = make_dpo_pairs(rl_inputs, rewards)
             total_pairs = len(chosen_segments)
@@ -213,7 +420,7 @@ class Brain:
                 torch.cuda.empty_cache()
                 gc.collect()
             print(f"  ✅ RL training step completed")
-        elif self.learning_algorithm in SupervisedALiasNames:
+        elif self.algorithm in SupervisedALiasNames:
             self.learning_module.train_step([rl_inputs])
             print(f"  ✅ Supervised training step completed")
 
@@ -352,15 +559,13 @@ class Brain:
 
         return examples
     
-
-
     def _get_distillation_config(self) -> Dict[str, Any]:
         """Get configuration for distillation."""
         return {
             "num_traces": 100,
             "accuracy_threshold": 0.9,
             "batch_size": self.config.get("batch_size", 4),
-            "learning_rate": self.config.get("lr", 5e-5),
+            "learning_rate": self.config.get("learning_rate", 5e-5),
             "use_bitsandbytes": self.config.get("use_bitsandbytes", False)
         }
     
@@ -487,7 +692,7 @@ class Brain:
         
         # Create supervised learning module
         distill_config = {
-            "lr": learning_rate,
+            "learning_rate": learning_rate,
             "batch_size": batch_size, 
             "epochs": 1,
             "max_grad_norm": 1.0,
@@ -574,3 +779,145 @@ class Brain:
         
         print("✅ Distillation complete! Student model pre-trained with teacher knowledge")
         print("\n Starting regular training with RL...")
+
+    # Save/Load functionality
+    def save(self, output_dir: str) -> None:
+        """
+        Save the fine-tuned model adapters to a directory.
+        
+        This method:
+        - Saves LoRA adapters using save_pretrained()
+        - Saves tokenizer using save_pretrained() 
+        
+        Args:
+            output_dir: Directory to save the model adapters
+        """
+        from pathlib import Path
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        print(f"\n💾 Saving fine-tuned model to '{output_dir}'...")
+        
+        try:
+            # Get trained model (same pattern as examples)
+            trained_agent = self.get_agent()
+            
+            # Save model adapters and tokenizer (align with examples)
+            trained_agent.model.model.save_pretrained(output_dir)
+            trained_agent.model.tokenizer.save_pretrained(output_dir)
+            
+            print(f"✅ Model adapters successfully saved to '{output_dir}'")
+            
+        except Exception as e:
+            print(f"❌ Error saving model: {e}")
+            raise
+    
+    @staticmethod
+    def load_agent(
+        model_dir: str, 
+        base_model_id: str,
+        tools: List[Callable],
+        **model_kwargs
+    ) -> CodeAgent:
+        """
+        Load a fine-tuned agent from a directory.
+        
+        This method:
+        - Creates base model (UnslothModel or TransformersModel)
+        - Loads LoRA adapters using load_adapter()
+        - Returns ready-to-use CodeAgent
+        
+        Args:
+            model_dir: Directory containing the saved model adapters
+            base_model_id: Base model ID (e.g., "microsoft/DialoGPT-medium")
+            tools: List of tools for the agent (required)
+            **model_kwargs: Additional arguments for model creation
+        
+        Returns:
+            Loaded CodeAgent ready for use
+            
+        Example:
+            >>> tools = [search_tool, email_tool]
+            >>> agent = Brain.load_agent("./my_model", "microsoft/DialoGPT-medium", tools)
+            >>> # Agent ready to use with trained adapters!
+        """
+        from .factory import create_agent  
+        from pathlib import Path
+        
+        model_path = Path(model_dir)
+        
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model directory not found: {model_dir}")
+        
+        print(f"\n📂 Loading fine-tuned agent from '{model_dir}'...")
+        print(f"   Base model: {base_model_id}")
+        
+        try:
+            # Create base agent
+            agent = create_agent(
+                model_id=base_model_id, 
+                tools=tools,
+                **model_kwargs
+            )
+            
+            # Load LoRA adapters 
+            print(f"   🔧 Loading LoRA adapters...")
+            agent.model.model.load_adapter(model_dir)
+            
+            print(f"   ✅ Fine-tuned agent loaded successfully")
+            return agent
+                
+        except Exception as e:
+            print(f"❌ Error loading model: {e}")
+            raise
+    
+    @classmethod
+    def load_and_continue_training(
+        cls,
+        model_dir: str,
+        base_model_id: str,
+        tools: List[Callable],
+        reward_func: Optional[Union[RewardFunction, BatchRewardFunction]] = None,
+        **kwargs
+    ) -> 'Brain':
+        """
+        Load a previously trained agent and create a new Brain for continued training.
+        
+        Args:
+            model_dir: Directory containing the saved model adapters
+            base_model_id: Base model ID (e.g., "microsoft/DialoGPT-medium") 
+            tools: List of tools (required)
+            reward_func: Reward function for continued training
+            **kwargs: Additional arguments for Brain creation
+        
+        Returns:
+            Brain instance ready for continued training
+            
+        Example:
+            >>> tools = [search_tool, email_tool]
+            >>> brain = Brain.load_and_continue_training(
+            ...     model_dir="./my_model",
+            ...     base_model_id="microsoft/DialoGPT-medium", 
+            ...     tools=tools,
+            ...     reward_func=my_reward_func
+            ... )
+            >>> # Brain ready for continued training
+        """
+        print(f"\n🔄 Loading agent for continued training...")
+        
+        # Load the trained agent (using simplified method)
+        agent = cls.load_agent(
+            model_dir=model_dir,
+            base_model_id=base_model_id, 
+            tools=tools
+        )
+        
+        # Create Brain with loaded agent (using default algorithm)
+        brain = cls(
+            agent=agent,
+            reward_func=reward_func,
+            **kwargs
+        )
+        
+        print("✅ Brain ready for continued training")
+        return brain
