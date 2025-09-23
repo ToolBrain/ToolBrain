@@ -70,7 +70,6 @@ def create_agent(
     model_id: str,
     tools: List[Any],
     *,  # Force keyword-only arguments
-    system_prompt: Optional[str] = None,
     use_unsloth: Optional[bool] = None,
     max_seq_length: int = 4096,
     max_new_tokens: int = 4096,
@@ -89,7 +88,6 @@ def create_agent(
     Args:
         model_id: HuggingFace model ID
         tools: Complete list of tools the agent can use
-        system_prompt: Custom system prompt (optional)
         use_unsloth: Force use/not use Unsloth (auto-detect if None)
         max_seq_length: Maximum sequence length for the model
         max_new_tokens: Maximum tokens to generate during inference
@@ -129,8 +127,7 @@ def create_agent(
     # Create agent with model and tools
     agent = CodeAgent(
         model=model,
-        tools=tools,
-        system_prompt=system_prompt
+        tools=tools
     )
     
     print(f"✅ Created agent with {len(tools)} tools")
