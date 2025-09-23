@@ -332,6 +332,11 @@ class SmolAgentAdapter(BaseAgentAdapter):
     def _set_lora_finetuning(self):
         lora_config = self.config.get("lora_config", None)
         if lora_config:
+            # Convert dict to LoraConfig object if needed
+            if isinstance(lora_config, dict):
+                from peft import LoraConfig
+                lora_config = LoraConfig(**lora_config)
+            
             is_unsloth_model = (
                 UNSLOTH_AVAILABLE
                 and hasattr(self.agent.model, "model")
