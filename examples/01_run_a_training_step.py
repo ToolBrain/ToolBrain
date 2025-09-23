@@ -93,49 +93,47 @@ def main():
     # User only needs to specify what they want to change
 
     # === DEMO: Override just 1-2 key parameters ===
-    brain_custom = Brain(
-        agent,
-        algorithm="GRPO",
-        learning_rate=1e-5,             # Override learning rate
-        num_group_members=2             # And group size for faster
-    )
+    # brain_custom = Brain(
+    #     agent,
+    #     algorithm="GRPO",
+    #     learning_rate=1e-5,             # Override learning rate
+    #     num_group_members=2             # And group size for faster
+    # )
 
     # 3. Demo other algorithms
 
     # DPO example - only override algorithm-specific parameters
-    dpo_brain = Brain(
-        agent,
-        algorithm="DPO",                # Different algorithm
-        beta=0.04                       # Only override DPO-specific parameter
-        # All others use defaults: learning_rate=3e-5, num_group_members=10, etc.
-    )
+    # dpo_brain = Brain(
+    #     agent,
+    #     algorithm="DPO",                # Different algorithm
+    #     beta=0.04                       # Only override DPO-specific parameter
+    #     # All others use defaults: learning_rate=3e-5, num_group_members=10, etc.
+    # )
     
     # Supervised example
-    supervised_brain = Brain(
-        agent,
-        algorithm="Supervised",         # Supervised learning
-        learning_rate=5e-5
-    )
+    # supervised_brain = Brain(
+    #     agent,
+    #     algorithm="Supervised",         # Supervised learning
+    #     learning_rate=5e-5
+    # )
 
     # === DEMO: Tool Retrieval Feature ===
-    retrieval_brain = Brain(
-        agent,
-        algorithm="GRPO",
-        learning_rate=1e-5,
-        num_group_members=2,
-        enable_tool_retrieval=True,      # Enable intelligent tool filtering
-        retrieval_topic="mathematics",   # Domain for tool selection
-        retrieval_guidelines="Select only tools needed for mathematical calculations"
-    )
+    # retrieval_brain = Brain(
+    #     agent,
+    #     algorithm="GRPO",
+    #     learning_rate=1e-5,
+    #     num_group_members=2,
+    #     enable_tool_retrieval=True,      # Enable intelligent tool filtering
+    #     retrieval_topic="mathematics",   # Domain for tool selection
+    #     retrieval_guidelines="Select only tools needed for mathematical calculations"
+    # )
 
     # 4. Train with the GRPO brain (using brain_custom for faster)
-    print("\n🚀 Starting training...")
-    
-    brain_custom.train(training_dataset, num_iterations=1)
+    brain.train(training_dataset, num_iterations=1)
     
     # 5. Get trained agent
     print("\n🎉 Training completed!")
-    trained_agent = brain_custom.get_agent()
+    trained_agent = brain.get_agent()
     print("✅ Trained agent is ready to use!")
 
     # === DEMO: Save/Load Functionality ===
@@ -145,7 +143,7 @@ def main():
     # Save the trained model
     model_save_path = "./saved_math_model"
     print(f"Saving model to: {model_save_path}")
-    brain_custom.save(model_save_path)
+    brain.save(model_save_path)
     
     # Load the saved model back
     print(f"Loading model from: {model_save_path}")

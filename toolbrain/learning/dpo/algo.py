@@ -36,12 +36,12 @@ class DPOAlgorithm:
         if use_bitandbytes:
             self.optimizer = bnb.optim.AdamW8bit(
                 self.policy.llm.parameters(),
-                lr=self.config["lr"],
+                lr=self.config["learning_rate"],
             )
         else:
             self.optimizer = torch.optim.AdamW(
                 self.policy.llm.parameters(),
-                lr=self.config["lr"]
+                lr=self.config["learning_rate"]
             )
 
     def _update_policy(self, pi_theta, loss):
@@ -207,7 +207,7 @@ if __name__ == "__main__":
 
     # === Config ===
     config = {
-        "lr": 1e-5,
+        "learning_rate": 1e-5,
         "max_grad_norm": 1.0,
         "chunk_len": 128,
         "beta": 0.1,

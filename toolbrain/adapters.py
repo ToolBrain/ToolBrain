@@ -5,11 +5,13 @@ This module provides the Adapter pattern implementation to make different
 agent libraries compatible with ToolBrain's trace-based training system.
 """
 
-try:
+try: 
     from unsloth import FastLanguageModel
-
     UNSLOTH_AVAILABLE = True
-except ImportError:
+except (ImportError, NotImplementedError):
+    # ImportError: unsloth not installed
+    # NotImplementedError: unsupported GPU (e.g., no NVIDIA/Intel GPU)
+    FastLanguageModel = None
     UNSLOTH_AVAILABLE = False
 
 from abc import ABC, abstractmethod

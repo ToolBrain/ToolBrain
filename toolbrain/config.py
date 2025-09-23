@@ -38,6 +38,10 @@ class BaseConfig(ABC):
                 result[key] = value
         return result
     
+    def get(self, key: str, default=None):
+        """Get attribute value."""
+        return getattr(self, key, default)
+    
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'BaseConfig':
         """Create config from dictionary."""

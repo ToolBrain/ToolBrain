@@ -1,9 +1,12 @@
 import platform
+
 if platform.system() != "Darwin":  # Darwin means macOS
-    try:
+    try:    
         from unsloth import FastLanguageModel
         UNSLOTH_AVAILABLE = True
-    except ImportError:
+    except (ImportError, NotImplementedError):
+        # ImportError: unsloth not installed
+        # NotImplementedError: unsupported GPU (e.g., no NVIDIA/Intel GPU)
         FastLanguageModel = None
         UNSLOTH_AVAILABLE = False
 else:

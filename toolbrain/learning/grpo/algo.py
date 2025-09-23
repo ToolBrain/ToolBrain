@@ -16,7 +16,7 @@ def validate_config(config: dict) -> None:
     Raises:
         ValueError: If any required keys are missing.
     """
-    required_keys = {"epsilon", "beta", "opt_steps", "lr", "max_grad_norm", "chunk_len"}
+    required_keys = {"epsilon", "beta", "opt_steps", "learning_rate", "max_grad_norm", "chunk_len"}
 
     for key in required_keys:
         if key not in config.keys():
@@ -55,12 +55,12 @@ class GRPOAlgorithm:
         if use_bitandbytes:
             self.optimizer = bnb.optim.AdamW8bit(
                 self.policy.llm.parameters(),
-                lr=self.config["lr"],
+                lr=self.config["learning_rate"],
             )
         else:
             self.optimizer = torch.optim.AdamW(
                 self.policy.llm.parameters(),
-                lr=self.config["lr"]
+                lr=self.config["learning_rate"]
             )
 
 
@@ -210,7 +210,7 @@ if __name__ == "__main__":
         "epsilon": 0.2,  # clipping parameter
         "beta": 0.04,  # KL divergence penalty coefficient
         "opt_steps": 3,  # Number of GRPO optimization steps per batch
-        "lr": 1e-5,  # Learning rate for optimizer
+        "learning_rate": 1e-5,  # Learning rate for optimizer
         "max_grad_norm": 1.0,
         "chunk_len": 128,  # If not None, get_per_token_logps will process in chunks
     }
