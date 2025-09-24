@@ -53,7 +53,7 @@ class Brain:
         
         # === GRPO Specific Parameters ===
         epsilon: float = 0.2,          # GRPO clip ratio
-        num_group_members: int = 10,   # Number of traces per training step
+        num_group_members: int = 2,    # Number of traces per training step (reduced for memory efficiency)
         
         # === DPO Specific Parameters ===  
         beta: float = 0.1,             # DPO temperature parameter
@@ -317,7 +317,7 @@ class Brain:
         traces: List[Trace] = []
         rl_inputs: List[Any] = []
         raw_memory_collection: List[List[Any]] = []  # Collection of raw memory steps
-        num_group_members = self.config.get("num_group_members", 10)
+        num_group_members = self.config.get("num_group_members", 2)
         print(f"  📊 Collecting {num_group_members} traces...")
         
         # Store original tools and apply tool retrieval if enabled
@@ -381,7 +381,7 @@ class Brain:
     def train_step(self, query: Any, reward_kwargs: Dict[str, Any]):
         """Executes a single training step for a given query."""
         print(f"\n🔄 Training step for query: '{query[:50]}...'")
-        num_group_members = self.config.get("num_group_members", 10)
+        num_group_members = self.config.get("num_group_members", 2)
         if num_group_members == 1 and self.algorithm in DPOALiasNames:
             raise NotImplementedError(f"Algorithm '{self.algorithm}' requires num_group_members > 1!")
 

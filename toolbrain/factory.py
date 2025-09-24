@@ -21,8 +21,8 @@ from .core_types import RewardFunction, BatchRewardFunction
 def create_optimized_model(
     model_id: str,
     use_unsloth: Optional[bool] = None,
-    max_seq_length: int = 4096,
-    max_new_tokens: int = 4096,
+    max_seq_length: int = 17408,  # Match examples 08: 16896 + buffer for safety
+    max_new_tokens: int = 512,    # Match examples 08
     **model_kwargs
 ):
     """
@@ -71,8 +71,8 @@ def create_agent(
     tools: List[Any],
     *,  # Force keyword-only arguments
     use_unsloth: Optional[bool] = None,
-    max_seq_length: int = 4096,
-    max_new_tokens: int = 4096,
+    max_seq_length: int = 17408,  
+    max_new_tokens: int = 512,   
     **model_kwargs
 ):
     """
@@ -127,7 +127,8 @@ def create_agent(
     # Create agent with model and tools
     agent = CodeAgent(
         model=model,
-        tools=tools
+        tools=tools,
+        max_steps=10  
     )
     
     print(f"✅ Created agent with {len(tools)} tools")
