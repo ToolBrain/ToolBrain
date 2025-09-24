@@ -100,7 +100,9 @@ class GRPOAlgorithm:
         # save segments to a file named based on current timestamp
         import time
         import json
+        import os
         timestamp = int(time.time())
+        os.makedirs('segments', exist_ok=True)  
         with open(f'segments/{timestamp}.json', 'w') as f:
             json.dump(segments, f, indent=4, ensure_ascii=False)
         print(f"Segments saved to segments/{timestamp}.json")
