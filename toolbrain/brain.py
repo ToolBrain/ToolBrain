@@ -117,7 +117,7 @@ class Brain:
             >>> brain = Brain(agent, algorithm="GRPO", learning_rate=1e-4,
             ...              enable_tool_retrieval=True, retrieval_topic="data science")
         """
-        print(f"🧠 Initializing Brain with {algorithm} algorithm...")
+
         
         # Store core settings
         self.agent = agent
@@ -138,7 +138,7 @@ class Brain:
         if algorithm.upper() == "GRPO":
             config.epsilon = epsilon
             config.num_group_members = num_group_members
-            print(f"   GRPO settings: learning_rate={learning_rate}, epsilon={epsilon}, num_group_members={num_group_members}")
+
             
         elif algorithm.upper() == "DPO":
             config.beta = beta
@@ -146,20 +146,19 @@ class Brain:
             config.label_smoothing = label_smoothing
             # DPO requires multiple traces
             config.num_group_members = max(num_group_members, 2)  # At least 2 for comparison
-            print(f"   DPO settings: learning_rate={learning_rate}, beta={beta}, loss_type={loss_type}")
             
         elif algorithm.upper() == "SUPERVISED":
-            print(f"   Supervised settings: learning_rate={learning_rate}")
+            pass  # No additional parameters needed
             
         else:
-            print(f"   ⚠️ Unknown algorithm '{algorithm}', using as-is")
+            pass  # Unknown algorithm, use config as-is
             
         self.config = config
         
         # Handle reward function
         if reward_func is None:
             reward_func = reward_exact_match
-            print("   Using default reward: exact_match")
+
         
         if not isinstance(reward_func, RewardFunctionWrapper):
             reward_func = create_reward_function(reward_func)
@@ -172,7 +171,7 @@ class Brain:
         
         if enable_tool_retrieval:
             self._setup_tool_retrieval()
-            print(f"   🔍 Tool retrieval enabled for topic: '{retrieval_topic}'")
+
         else:
             self.retriever = None
         
@@ -181,7 +180,7 @@ class Brain:
         
         # Initialize adapter and algorithm
         self.agent_adapter = self._get_adapter_for_agent(agent)
-        print(f"   Using adapter: {type(self.agent_adapter).__name__}")
+
         
         # Get trainable model from adapter and setup training
         self._setup_training()
@@ -189,17 +188,14 @@ class Brain:
         # Legacy compatibility
         self.reward_buffer = deque(maxlen=10)
         
-        print("✅ Brain initialization completed")
-
     def _setup_tool_retrieval(self):
         """Setup tool retrieval components."""
         try:
             from .retriever import ToolRetriever
             self.retriever = ToolRetriever()
-            print(f"   ✅ Tool retriever initialized for '{self.retrieval_topic}' domain")
+
         except ImportError as e:
-            print(f"   ❌ Could not import ToolRetriever: {e}")
-            print("   ❌ Tool retrieval will be disabled")
+
             self.retriever = None
             self.enable_tool_retrieval = False
 
@@ -243,8 +239,6 @@ class Brain:
         else:
             raise ValueError(f"Unknown learning algorithm: {self.algorithm}")
         
-        print(f"   ✅ Initialized {self.algorithm} algorithm")
-
     def _retrieve_relevant_tools(self, query: str) -> List[Any]:
         """
         Use tool retriever to select relevant tools for the query.
@@ -267,13 +261,12 @@ class Brain:
                 guidelines=self.retrieval_guidelines or "Select tools that are directly relevant to accomplishing the task."
             )
             
-            print(f"   🔍 Selected {len(relevant_tools)}/{len(self.agent.tools)} relevant tools: {[getattr(t, 'name', str(t)) for t in relevant_tools]}")
+
             
             return relevant_tools if relevant_tools else self.agent.tools
             
         except Exception as e:
-            print(f"   ⚠️ Tool retrieval failed: {e}")
-            print("   ℹ️ Falling back to using all available tools")
+
             return self.agent.tools
 
     def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
@@ -318,12 +311,12 @@ class Brain:
         rl_inputs: List[Any] = []
         raw_memory_collection: List[List[Any]] = []  # Collection of raw memory steps
         num_group_members = self.config.get("num_group_members", 2)
-        print(f"  📊 Collecting {num_group_members} traces...")
+
         
         # Store original tools and apply tool retrieval if enabled
         original_tools = None
         if self.enable_tool_retrieval:
-            print(f"  🔍 Retrieving relevant tools for query...")
+
             relevant_tools = self._retrieve_relevant_tools(query)
             
             # Backup original tools (list)

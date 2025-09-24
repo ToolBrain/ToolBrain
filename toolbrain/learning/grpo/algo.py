@@ -95,17 +95,7 @@ class GRPOAlgorithm:
         )  # train the main policy in-place to keep optimizer params in sync
         assert len(segments) == len(
             rewards
-        ), f"Length of traces and rewards must be the same. Received {len(traces)} traces, {len(rewards)} rewards."
-
-        # save segments to a file named based on current timestamp
-        import time
-        import json
-        import os
-        timestamp = int(time.time())
-        os.makedirs('segments', exist_ok=True)  
-        with open(f'segments/{timestamp}.json', 'w') as f:
-            json.dump(segments, f, indent=4, ensure_ascii=False)
-        print(f"Segments saved to segments/{timestamp}.json")
+        ), f"Length of traces and rewards must be the same. Received {len(segments)} traces, {len(rewards)} rewards."
 
         batch = build_inputs(
             segments=segments, rewards=rewards, tokenizer=pi_theta.tokenizer
@@ -167,56 +157,3 @@ class GRPOAlgorithm:
             f"GRPOAlgorithm(epsilon={self.config.get('epsilon')}, beta={self.config.get('beta')}, "
             f"opt_steps={self.config.get('opt_steps')}, steps={self.training_steps})"
         )
-
-
-if __name__ == "__main__":
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    # Traces
-    traces: List[List[ChatSegment]] = [
-        [
-            ChatSegment(
-                role="other",
-                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
-            ),
-            ChatSegment(
-                role="assistant", text="I calculate it myself! Final Answer: 55"
-            ),
-        ],
-        [
-            ChatSegment(
-                role="other",
-                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
-            ),
-            ChatSegment(
-                role="assistant",
-                text="<code> sum(list(range(1,11)))</code>",
-            ),
-            ChatSegment(role="other", text="Final Answer: 55"),
-        ],
-    ]
-
-    # Policy
-    model_id = "gpt2"
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    llm = AutoModelForCausalLM.from_pretrained(model_id)
-    initial_policy = Policy(llm=llm, tokenizer=tokenizer)
-
-    # Rewards
-    rewards = torch.rand(len(traces))
-
-    # Config
-    config = {
-        "epsilon": 0.2,  # clipping parameter
-        "beta": 0.04,  # KL divergence penalty coefficient
-        "opt_steps": 3,  # Number of GRPO optimization steps per batch
-        "learning_rate": 1e-5,  # Learning rate for optimizer
-        "max_grad_norm": 1.0,
-        "chunk_len": 128,  # If not None, get_per_token_logps will process in chunks
-    }
-
-    algo = GRPOAlgorithm(initial_policy=initial_policy, config=config)
-
-    algo.train_step(segments=traces, rewards=rewards)

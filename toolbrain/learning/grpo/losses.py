@@ -78,5 +78,3 @@ if __name__ == "__main__":
         beta,
         completion_mask
     )
-
-    print("Test loss:", loss.item()) # -0.30953896045684814

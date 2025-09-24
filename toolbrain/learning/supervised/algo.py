@@ -49,7 +49,6 @@ class SupervisedAlgorithm:
         loss.backward()
         clip_grad_norm_(model.parameters(), self.config["max_grad_norm"])
         self.optimizer.step()
-        print(f"Loss at step {self.training_steps}: {loss.item():.4f}")
         return pi_theta
 
     def train_step(
@@ -96,52 +95,3 @@ class SupervisedAlgorithm:
 
 
 
-if __name__ == "__main__":
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    # === Batch of size 2 ===
-    segments: List[List[ChatSegment]] = [
-        [
-            ChatSegment(
-                role="other",
-                text="You are a Python assistant. Compute the sum of 1..10 and explain briefly.",
-            ),
-            ChatSegment(
-                role="assistant",
-                text="The sum of numbers from 1 to 10 is 55, using the formula n(n+1)/2."
-            ),
-        ],
-        [
-            ChatSegment(
-                role="other",
-                text="Translate 'Good morning' into French.",
-            ),
-            ChatSegment(
-                role="assistant",
-                text="In French, it is 'Bonjour'."
-            ),
-        ],
-    ]
-
-    # === Policy ===
-    model_id = "gpt2"
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    llm = AutoModelForCausalLM.from_pretrained(model_id)
-    initial_policy = Policy(llm=llm, tokenizer=tokenizer)
-
-    # === Config ===
-    config = {
-        "learning_rate": 1e-5,
-        "max_grad_norm": 1.0,
-        "chunk_len": 128,
-        "beta": 0.1,
-    }
-
-    algo = SupervisedAlgorithm(initial_policy=initial_policy, config=config)
-
-    # === One train step with batch size 2 ===
-    algo.train_step(
-        segments=segments
-    )

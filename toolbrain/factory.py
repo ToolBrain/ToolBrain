@@ -51,7 +51,6 @@ def create_optimized_model(
         use_unsloth = (UNSLOTH_AVAILABLE and platform.system() != "Darwin")
     
     if use_unsloth and UNSLOTH_AVAILABLE:
-        print(f"Creating UnslothModel for faster training: {model_id}")
         return UnslothModel(
             model_id=model_id,
             max_seq_length=max_seq_length,
@@ -59,7 +58,6 @@ def create_optimized_model(
             **model_kwargs
         )
     else:
-        print(f"Creating standard TransformersModel: {model_id}")  
         return TransformersModel(
             model_id=model_id,
             max_new_tokens=max_new_tokens,
@@ -107,8 +105,6 @@ def create_agent(
     """
     from smolagents import CodeAgent
     
-    print(f"Creating agent with model: {model_id}")
-    
     # Create optimized model
     model = create_optimized_model(
         model_id=model_id,
@@ -121,7 +117,6 @@ def create_agent(
     # Ensure tokenizer has chat template
     tokenizer = model.tokenizer
     if tokenizer.chat_template is None:
-        print("🔧 Setting a default chat template for the tokenizer.")
         tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '<|user|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'system' %}{{ '<|system|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\n'  + message['content'] + '<|end|>\n' }}{% endif %}{% endfor %}"
 
     # Create agent with model and tools
@@ -131,5 +126,4 @@ def create_agent(
         max_steps=10  
     )
     
-    print(f"✅ Created agent with {len(tools)} tools")
     return agent

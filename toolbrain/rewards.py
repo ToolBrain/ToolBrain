@@ -235,7 +235,6 @@ def _parse_ranking_from_llm(response_text: str, num_traces: int) -> Optional[Lis
             len(set(ranked_ids)) == num_traces):
             return ranked_ids
         else:
-            print(f"⚠️ LLM Judge Parsing Warning: Invalid ranking received. Got: {ranked_ids} from text: '{response_text}'")
             return None
     except Exception:
         return None
@@ -273,7 +272,6 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
         A list of float scores, one for each trace, in the original order.
     """
     if litellm is None:
-        print("⚠️ LiteLLM is not installed. Skipping LLM judge. `pip install litellm`")
         return [0.5] * len(traces)
 
     if not traces:
@@ -306,7 +304,6 @@ Review all trajectories above. Rank them from BEST to WORST based on correctness
 
     # 2. Call LLM Judge
     try:
-        print(f"    ⚖️  Sending {num_traces} traces to LLM Judge ({judge_model}) for ranking...")
         response = litellm.completion(
             model=judge_model,
             messages=[
@@ -331,22 +328,18 @@ Review all trajectories above. Rank them from BEST to WORST based on correctness
             ranking = result_dict.get("ranking", [])
             reasoning = result_dict.get("reasoning", "No reasoning provided")
         
-        print(f"    ✅ LLM Judge ranking: {ranking}")
-        print(f"    📝 Judge reasoning: {reasoning[:100]}...")
+
         
         # 3. Validate ranking
         
         if ranking:
             # 4. Convert ranking to scores
             scores = _convert_ranking_to_scores(ranking, num_traces)
-            print(f"    ✅ LLM Judge ranked traces as {ranking}, converted to scores: {[f'{s:.2f}' for s in scores]}")
             return scores
         else:
-            print("    ⚠️ LLM Judge failed to provide a valid ranking. Returning neutral rewards.")
             return [0.5] * num_traces
 
     except Exception as e:
-        print(f"    ❌ Error calling LLM Judge via LiteLLM: {e}")
         return [0.5] * num_traces
 
 
@@ -422,7 +415,6 @@ class RewardFunctionWrapper:
                     score = self.reward_func(trace=trace, **kwargs)
                     scores.append(float(score))
                 except Exception as e:
-                    print(f"⚠️ Error computing reward for trace: {e}")
                     scores.append(0.0)
             return scores
     

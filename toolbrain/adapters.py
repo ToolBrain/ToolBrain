@@ -67,7 +67,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
         self.agent = agent
         self.config = config
         self._set_lora_finetuning()
-        print("✅ SmolAgentAdapter: Initialized for local model training.")
 
     def get_trainable_model(self) -> TransformersModel:
         """Returns the agent's underlying TransformersModel."""
@@ -88,8 +87,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 - rl_input: Any - input prepared for RL training
                 - raw_memory_steps: List[Any] - raw agent memory steps for advanced analysis
         """
-        print(f"🚀 Adapter is calling agent.run() for query: '{query[:50]}...'")
-
         try:
             with torch.inference_mode():
                 self.agent.run(query, reset=True)
@@ -161,7 +158,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
                 messages, add_generation_prompt=True, tokenize=False
             )
         except Exception as e:
-            print(f"⚠️ Warning: Failed to generate formatted conversation: {e}")
             formatted_conversation = None
 
         full_trace: Trace = []
@@ -346,9 +342,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
             )
 
             if is_unsloth_model:
-                print(
-                    "✅ Applying LoRA configuration using Unsloth's optimized method..."
-                )
                 self.agent.model.model = FastLanguageModel.get_peft_model(
                     self.agent.model.model,
                     # lora_config,
@@ -361,11 +354,8 @@ class SmolAgentAdapter(BaseAgentAdapter):
                     max_seq_length=512,
                 )
             else:
-                print("Applying LoRA configuration using standard PEFT...")
                 hf_model = get_peft_model(self.agent.model.model, lora_config)
                 self.agent.model.model = hf_model
-
-            print(f"✅ LoRA configuration is successful!")
             total_params = sum(p.numel() for p in self.agent.model.model.parameters())
             trainable_params = sum(
                 p.numel()
@@ -374,9 +364,4 @@ class SmolAgentAdapter(BaseAgentAdapter):
             )
             percentage = (
                 100 * trainable_params / total_params if total_params > 0 else 0
-            )
-
-            print(
-                f"Trainable parameters: {trainable_params:,} / {total_params:,} "
-                f"({percentage:.2f}%)"
             )
