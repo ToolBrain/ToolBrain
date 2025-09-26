@@ -9,13 +9,13 @@ import gc
 import json
 import os
 import re
-import contextlib
 from collections import deque
 from typing import Any, List, Dict, Union, Tuple, Optional, Callable
-from pathlib import Path
-import logging
 
+import torch
 import numpy as np
+from textwrap import dedent
+from smolagents import CodeAgent, ChatMessage, MessageRole, TransformersModel
 
 from .learning.supervised.algo import SupervisedAlgorithm
 from .rewards import RewardFunctionWrapper, create_reward_function, reward_exact_match
@@ -25,16 +25,15 @@ from .learning.dpo.algo import DPOAlgorithm
 from .learning.dpo.utils import make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
-from .config import BaseConfig, get_config, GRPOConfig, DPOConfig, SupervisedConfig
+from .config import BaseConfig, get_config
 from .prompt import (
     build_prompt_to_generate_training_examples,
     validate_model,
     validate_tools,
     tools_to_card,
 )
-from smolagents import CodeAgent, ChatMessage, MessageRole, TransformersModel
-import torch
-from textwrap import dedent
+
+
 GRPOALiasNames = ["GRPO", "grpo"]
 DPOALiasNames = ["DPO", "dpo"]
 SupervisedALiasNames = ["Supervised", "supervised", "supervise"]
@@ -423,7 +422,6 @@ class Brain:
             self.learning_module.train_step([rl_inputs])
             print(f"  ✅ Supervised training step completed")
 
-
     def get_agent(self) -> Any:
         """
         Returns the trained agent with the same type as the input agent.
@@ -477,8 +475,6 @@ class Brain:
         except Exception:
             return False
     
-
-
     def generate_training_examples(
             self,
             task_description: str | None = None,
@@ -552,7 +548,6 @@ class Brain:
                 del model
             torch.cuda.empty_cache()
             gc.collect()
-
 
     def rank_generated_examples(
             self,
@@ -643,8 +638,7 @@ class Brain:
                 del model
             torch.cuda.empty_cache()
             gc.collect()
-    
-    
+     
     def _get_distillation_config(self) -> Dict[str, Any]:
         """Get configuration for distillation."""
         return {
