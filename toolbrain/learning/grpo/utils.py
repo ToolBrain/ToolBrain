@@ -1,6 +1,7 @@
+import json
 from dataclasses import dataclass
 from typing import List
-import json
+
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase

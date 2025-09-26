@@ -21,8 +21,7 @@ from .learning.supervised.algo import SupervisedAlgorithm
 from .rewards import RewardFunctionWrapper, create_reward_function, reward_exact_match
 from .core_types import Trace, RewardFunction, BatchRewardFunction
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
-from .learning.dpo.algo import DPOAlgorithm
-from .learning.dpo.utils import make_dpo_pairs
+from .learning.dpo import DPOAlgorithm, make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
 from .config import BaseConfig, get_config

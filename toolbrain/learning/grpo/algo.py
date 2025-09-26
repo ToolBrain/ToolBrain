@@ -17,7 +17,7 @@ from typing import List, Optional
 import torch
 from torch.nn.utils import clip_grad_norm_
 
-from toolbrain.learning.grpo.utils import Policy, build_inputs
+from .utils import Policy, build_inputs
 from .losses import grpo_loss
 from ...core_types import ChatSegment
 
