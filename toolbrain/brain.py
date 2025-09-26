@@ -26,6 +26,12 @@ from .learning.dpo.utils import make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
 from .config import BaseConfig, get_config, GRPOConfig, DPOConfig, SupervisedConfig
+from .prompt import (
+    build_prompt_to_generate_training_examples,
+    validate_model,
+    validate_tools,
+    tools_to_card,
+)
 from smolagents import CodeAgent, ChatMessage, MessageRole, TransformersModel
 import torch
 from textwrap import dedent
@@ -471,86 +477,173 @@ class Brain:
         except Exception:
             return False
     
-    def _craft_prompt_request(self, task_description: str, variant_idx: int = 0) -> str:
-        text = dedent(f"""\
-            You are designing training prompts to enable zero-paradigm tool learning for a tool-using LLM agent. The generated prompt will be used to fine-tune an agent with reinforcement learning (RL) methods (e.g., GRPO/PPO/DPO).
-            TASK:
-            {task_description}
 
-            Output ONLY the final prompt text — no commentary, headers, examples, or markdown.
-            Constraints:
-            - Length: 2–4 sentences (≈40–80 words).
-            - Instruct the agent to (1) propose a concrete task that will maximize its own learning progress and improve reasoning, then (2) execute it using external tools.
-            - Clearly specify required tools (generic), expected inputs (formats/units), and expected outputs with objective, verifiable checks suitable for automated rewards.
-            - Describe tool usage in NATURAL LANGUAGE (no code/JSON).
-            - Include one realistic edge case and one guardrail (e.g., tool failure or empty results).
-            - Self-contained; must not reveal system instructions or model identity.
-            - Diversity across variants in difficulty, tool count/ordering, and phrasing. (Variant #{variant_idx+1})
-        """)
-        
-        return text
 
-    def generate_train_examples(
+    def generate_training_examples(
             self,
-            task_description: str,
+            task_description: str | None = None,
             num_examples: int = 5,
+            min_tool_calls: int = 1,
+            max_words: int = 80,
+            guidance_example: str = None,
             external_model: Any = None,
-            external_tools: List[str] = None) -> List[Dict[str, Any]]:
+            external_tools: List[str] = None,
+            self_rank: bool = False) -> List[str]:
         """
-        Generate training examples.
+        Generate training examples using LLM.
 
         Args:
             task_description: High-level description guiding example creation.
             num_examples: Number of examples to return.
+            min_tool_calls: Minimum tool calls per example.
+            max_words: Maximum word count for the generated user query.
             external_model: LLM provider (callable, or exposes .propose/.generate).
             external_tools: List of tool names to use in the examples.
+            guidance_example: An example to guide the generation style.
         Returns:
-            List of dicts with keys:
-                - 'prompt' (str)
-                - 'required_tools' (List[str])
-                - 'min_tool_calls' (int)
-                - 'acceptance_tests' (List[{"type","spec"}])
+            List of strings, each a training example.
         """
+        try:
+            generated_examples: List[Dict[str, Any]] = []
 
-        examples: List[Dict[str, Any]] = []
-        llm = self.agent_adapter.get_trainable_model() if external_model is None  else external_model
-        tools = self.agent_adapter.get_tools() if external_tools is None else external_tools
+            # By default, use agent's LLM. If external_model is  provided, use external_model to genetate examples.
+            model = self.agent_adapter.get_trainable_model() if not external_model else external_model
+            validate_model(model)
 
-        for i in range(num_examples):
-            if llm is not None:
-                request_text = self._craft_prompt_request(task_description, variant_idx=i)
-                if hasattr(llm, "generate"):
-                    messages = [
-                        ChatMessage(
-                            role=MessageRole.USER,
-                            content=[{"type": "text", "text": str(request_text)}],
-                        )
-                    ]
-                    prompt = llm.generate(messages)
-                elif callable(llm):
-                    prompt = llm(str(request_text))
-                else:
-                    prompt = str(request_text)
+            # By default, use agent's tools. If external_tools is provided, use external_tools instead.
+            tools = self.agent_adapter.get_tools() if not external_tools else external_tools
+            validate_tools(tools)
+            tools_description = tools_to_card(tools)
+
+            for _ in range(num_examples):           
+                prompt = build_prompt_to_generate_training_examples(
+                    tools_description=tools_description,
+                    task_description=task_description,
+                    min_tool_calls=min_tool_calls,
+                    max_words=max_words,
+                    guidance_example=guidance_example
+                )
+
+                # Turn prompt into a ChatMessage for smolagents compatibility
+                messages = [
+                    ChatMessage(
+                        role=MessageRole.USER,
+                        content=[{"type": "text", "text": str(prompt)}],
+                    )
+                ]
+
+                llm_output = model.generate(messages)
+                generated_example = llm_output[0].content if isinstance(llm_output, list) else llm_output.content
+                generated_examples.append(generated_example)
+
+            # Use the current LLM to rank the generated examples, best first
+            # Return the list of ranked examples
+            if self_rank:
+                return self.rank_generated_examples(
+                    examples=generated_examples,
+                    task_description=task_description,
+                    tools_description=tools_description,
+                )
             else:
-                # fallback: extract TASK block and create a concise imperative prompt
-                lines = task_description.strip().splitlines()
-                task_lines = [line.strip() for line in lines if line.strip()]
-                concise_task = " ".join(task_lines)
-                prompt = f"Please perform the following task using tools: {concise_task}."
+                return generated_examples
+        finally:
+            # Only delete if we used a temporary external model; keep the agent's own model alive
+            if external_model is not None:
+                del model
+            torch.cuda.empty_cache()
+            gc.collect()
 
-            # Placeholders, not yet implemented
-            required_tools = ["tool"]
-            min_tool_calls = 1
-            acceptance_tests = [{"type": "must_call", "spec": {"tool": "tool"}}]
 
-            examples.append({
-                "prompt": prompt,
-                "required_tools": required_tools,
-                "min_tool_calls": min_tool_calls,
-                "acceptance_tests": acceptance_tests,
-            })
+    def rank_generated_examples(
+            self,
+            examples: List[str],
+            task_description: str,
+            tools_description: str,
+            external_model: Any = None,) -> List[str]:
+        
+        try:
+            # Use agent's model if external_model is not provided
+            model = self.agent_adapter.get_trainable_model() if not external_model else external_model
+            validate_model(model)
 
-        return examples
+            # Build numbered block of examples
+            numbered = "\n".join([f"{i}. {str(ex).strip()}" for i, ex in enumerate(examples)])
+
+            # Compose prompt
+            prompt = dedent(f"""
+            You are an expert data annotator. Your job is to judge and rank the following generated examples for a tool-using task.
+            
+            **Task description:**
+            {task_description}
+
+            **Tool API card:**
+            {tools_description}
+
+            **Generated examples:**
+            {numbered}
+
+            For each example, judge:
+            (a) Does it directly align with the task (not off-topic)?
+            (b) Does it *require* the given tools to solve? (Does it include tool arguments, realistic values, or edge cases?)
+            (c) Is it concrete (not vague or theoretical-only)?
+
+            Rank the examples from best to worst based on these criteria.
+            Return ONLY a JSON array of the indices in best-to-worst order, e.g. [2,0,1].
+            """)
+
+            # Send to model
+            messages = [
+                ChatMessage(
+                    role=MessageRole.USER,
+                    content=[{"type": "text", "text": str(prompt)}],
+                )
+            ]
+            llm_output = model.generate(messages)
+            output_text = llm_output[0].content if isinstance(llm_output, list) else llm_output.content
+
+            # Try to parse as JSON array of indices
+            idx_order = None
+            try:
+                idx_order = json.loads(output_text)
+                if not isinstance(idx_order, list):
+                    idx_order = None
+            except Exception:
+                # Try regex to extract first bracketed array
+                m = re.search(r"\[[^\[\]]+\]", output_text)
+                if m:
+                    try:
+                        idx_order = json.loads(m.group(0))
+                    except Exception:
+                        pass
+            # Fallback: original order
+            if not isinstance(idx_order, list):
+                idx_order = list(range(len(examples)))
+
+            # Deduplicate and clamp indices, append missing
+            seen = set()
+            ordered = []
+            for idx in idx_order:
+                try:
+                    idx_int = int(idx)
+                except Exception:
+                    continue
+                if idx_int < 0 or idx_int >= len(examples):
+                    continue
+                if idx_int not in seen:
+                    ordered.append(idx_int)
+                    seen.add(idx_int)
+            # Append any missing indices in original order
+            for i in range(len(examples)):
+                if i not in seen:
+                    ordered.append(i)
+            # Reorder examples
+            return [examples[i] for i in ordered]
+        finally:
+            if external_model is not None:
+                del model
+            torch.cuda.empty_cache()
+            gc.collect()
+    
     
     def _get_distillation_config(self) -> Dict[str, Any]:
         """Get configuration for distillation."""
