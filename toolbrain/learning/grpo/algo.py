@@ -1,6 +1,18 @@
-# Paper DeepSeekMath: https://arxiv.org/pdf/2402.03300
+"""GRPO (Group Relative Policy Optimization) implementation.
+
+This module implements the GRPO algorithm, which performs ratio-based policy updates
+relative to a frozen “old” policy, while regularizing with a KL divergence penalty
+to a fixed reference policy. The implementation is based on the paper
+DeepSeekMath at https://arxiv.org/pdf/2402.03300
+
+Objective terms:
+- Policy ratio with advantage (encourages improvement over old policy)
+- Clipping via epsilon (to limit policy update magnitude)
+- KL penalty weighted by beta (to keep policy close to reference)
+"""
+
 import copy
-from typing import List
+from typing import List, Optional
 
 import torch
 from torch.nn.utils import clip_grad_norm_
@@ -8,44 +20,74 @@ from torch.nn.utils import clip_grad_norm_
 from toolbrain.learning.grpo.utils import Policy, build_inputs
 from .losses import grpo_loss
 from ...core_types import ChatSegment
-import bitsandbytes as bnb
+
+try:
+    import bitsandbytes as bnb
+except ImportError:
+    bnb = None
+
 
 def validate_config(config: dict) -> None:
     """
     Validate that the config dict contains all the required keys.
+
+    Required keys:
+        - epsilon
+        - beta
+        - opt_steps
+        - learning_rate
+        - max_grad_norm
+        - chunk_len
+
     Raises:
-        ValueError: If any required keys are missing.
+        ValueError: If any required keys are missing, listing all missing keys.
     """
     required_keys = {"epsilon", "beta", "opt_steps", "learning_rate", "max_grad_norm", "chunk_len"}
-
-    for key in required_keys:
-        if key not in config.keys():
-            raise ValueError(f"Invalid config: missing '{key}'")
+    missing_keys = required_keys - config.keys()
+    if missing_keys:
+        raise ValueError(f"Invalid config: missing keys {sorted(missing_keys)}")
 
 
 class GRPOAlgorithm:
-    """Lightweight trainer that wraps GRPO optimization around a Policy.
+    """
+    Lightweight trainer that wraps GRPO optimization around a Policy.
 
-    Usage:
-        algo = GRPOAlgorithm(policy)
-        algo.train_step(traces, rewards)
+    The training loop performs multiple optimization steps per batch,
+    computing policy ratio and KL penalty terms to update the policy.
+
+    Args:
+        initial_policy (Policy): The policy to be trained/updated in-place.
+        config (dict): Configuration dictionary with required keys.
+        ref_policy (Optional[Policy]): Fixed reference policy used for KL penalty.
+            If None, a deep copy of initial_policy is used as reference.
+
+    During training, the initial_policy parameters are updated, while ref_policy remains fixed.
     """
 
     def __init__(
         self,
         initial_policy: Policy,
         config: dict,
-        ref_policy: Policy = None,
+        ref_policy: Optional[Policy] = None,
     ) -> None:
+        """
+        Initialize GRPOAlgorithm with policies and configuration.
+
+        Args:
+            initial_policy (Policy): The policy to train.
+            config (dict): Configuration dictionary.
+            ref_policy (Optional[Policy]): Reference policy for KL penalty. Defaults to a copy of initial_policy.
+
+        Raises:
+            ImportError: If use_bitsandbytes=True in config but bitsandbytes is not installed.
+        """
         self.device = next(initial_policy.llm.parameters()).device
 
-        # self.accelerator = Accelerator()
-        # self.device = self.accelerator.device
+        # The policy to be trained/updated in-place
         self.policy = initial_policy
-        # self.policy = self.policy.to(self.device)
 
+        # The fixed reference policy used for KL penalty (not updated)
         self.pi_ref = ref_policy if ref_policy else copy.deepcopy(initial_policy)
-        # self.pi_ref = self.pi_ref.to(self.device)
 
         validate_config(config)
         self.config = config
@@ -53,6 +95,11 @@ class GRPOAlgorithm:
         self.training_steps = 0
         use_bitandbytes = config.get("use_bitsandbytes", False)
         if use_bitandbytes:
+            if bnb is None:
+                raise ImportError(
+                    "bitsandbytes is not installed but 'use_bitsandbytes=True' was set in config. "
+                    "Please install bitsandbytes to use 8-bit optimizer."
+                )
             self.optimizer = bnb.optim.AdamW8bit(
                 self.policy.llm.parameters(),
                 lr=self.config["learning_rate"],
@@ -64,8 +111,17 @@ class GRPOAlgorithm:
             )
 
 
-    def _update_policy(self, pi_theta, loss):
-        """Apply one optimizer step using the algorithm's optimizer and gradient clipping."""
+    def _update_policy(self, pi_theta: Policy, loss: torch.Tensor) -> Policy:
+        """
+        Perform one optimizer step: zero_grad, backward, gradient clipping, and optimizer step.
+
+        Args:
+            pi_theta (Policy): The policy to update.
+            loss (torch.Tensor): The computed loss tensor to backpropagate.
+
+        Returns:
+            Policy: The updated policy (same instance as input).
+        """
         model = getattr(pi_theta, "llm", None) or getattr(pi_theta, "model", None)
         if model is None:
             raise AttributeError("No model found in pi_theta")
@@ -75,7 +131,8 @@ class GRPOAlgorithm:
         loss.backward()
         clip_grad_norm_(model.parameters(), self.config["max_grad_norm"])
         self.optimizer.step()
-        print("Loss at step", self.training_steps, loss.item())
+        torch.cuda.empty_cache()
+        # LOG: Replace this comment with logging of loss.item() if desired
         return pi_theta
 
     def train_step(
@@ -83,16 +140,25 @@ class GRPOAlgorithm:
         segments: List[List[ChatSegment]],
         rewards: List[float],
     ) -> None:
-        """Run one GRPO update over a batch of traces.
+        """
+        Run one GRPO update over a batch of traces.
 
         Args:
-            traces: batch of traces; each trace is a list of Trace.
-            rewards: list of scalar rewards, one per trace.
+            segments (List[List[ChatSegment]]): Batch of traces; each trace is a list of ChatSegment.
+            rewards (List[float]): List of scalar rewards, one per trace.
+
+        Batch returned by build_inputs contains:
+            - input_ids: (B, L) token ids
+            - attention_mask: (B, L) mask for tokens
+            - completion_mask: (B, L) mask indicating completion tokens
+            - advantages: (B, L) advantage values per token
+
+        Note:
+            The per-token log-probs computed by get_per_token_logps drop the first token,
+            so advantages and completion_mask are sliced as [:, 1:] to align shapes with log-probs (B, L-1).
         """
         device = self.device
-        pi_theta = (
-            self.policy
-        )  # train the main policy in-place to keep optimizer params in sync
+        pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
         assert len(segments) == len(
             rewards
         ), f"Length of traces and rewards must be the same. Received {len(segments)} traces, {len(rewards)} rewards."
