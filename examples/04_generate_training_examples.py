@@ -1,3 +1,15 @@
+# EXAMPLE: Generating Training Examples for a Finance Agent
+
+# The `generate_training_examples` method of ToolBrain automatically creates example queries/prompts
+# that match your task description. It is useful for quickly generating diverse training
+# data without writing examples manually.
+# You can tweak these arguments to control the complexity and diversity of generated tasks.
+
+# In this example, we create a finance agent that can use tools to perform various financial calculations.
+# We then generate training examples for the agent to learn how to use these tools effectively.
+# Finally, we use the generated examples to train the agent.
+# Note: You can also manually curate or modify the generated examples before training.
+
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -6,7 +18,10 @@ from toolbrain import Brain, create_agent
 
 
 @tool
-def calculate_compound_interest(principal: float, rate: float, times_compounded: int, years: float) -> float:
+def calculate_compound_interest(principal: float,
+                                rate: float,
+                                times_compounded: int,
+                                years: float) -> float:
     """
     Calculate compound interest.
 
@@ -23,7 +38,9 @@ def calculate_compound_interest(principal: float, rate: float, times_compounded:
 
 
 @tool
-def calculate_loan_payment(principal: float, annual_rate: float, years: int) -> float:
+def calculate_loan_payment(principal: float,
+                           annual_rate: float,
+                           years: int) -> float:
     """
     Calculate monthly loan payment using the annuity formula.
 
@@ -56,7 +73,9 @@ def calculate_roi(gain: float, cost: float) -> float:
 
 
 @tool
-def calculate_cagr(begin_value: float, end_value: float, years: float) -> float:
+def calculate_cagr(begin_value: float,
+                   end_value: float,
+                   years: float) -> float:
     """
     Calculate Compound Annual Growth Rate (CAGR).
 
@@ -72,7 +91,8 @@ def calculate_cagr(begin_value: float, end_value: float, years: float) -> float:
 
 
 @tool
-def calculate_npv(rate: float, cash_flows: list[float]) -> float:
+def calculate_npv(rate: float,
+                  cash_flows: list[float]) -> float:
     """
     Calculate Net Present Value (NPV).
 
@@ -93,7 +113,12 @@ def main() -> None:
     )
     agent = create_agent(
         model_id="Qwen/Qwen2.5-0.5B-Instruct",
-        tools=[calculate_compound_interest, calculate_loan_payment, calculate_cagr, calculate_npv],
+        tools=[
+            calculate_compound_interest,
+            calculate_loan_payment,
+            calculate_cagr,
+            calculate_npv
+        ],
     )
     brain = Brain(agent=agent)
     generated_examples = brain.generate_training_examples(
@@ -107,23 +132,20 @@ def main() -> None:
         self_rank=True
     )
 
-    # for example in generated_examples:
-    #     print(example)
-    #     print("")
+    print("Generated Training Examples:")
+    for i, example in enumerate(generated_examples, 1):
+        print(f"{i}. {example}\n")
 
-    import json
-    with open("generated_training_examples_ranked.json", "w") as f:
-        json.dump(generated_examples, f, indent=4)
-
-    # generated_examples = ["How much interest will I earn on a $10,000 investment with a 7% annual interest rate over 5 years?"]
-    # training_dataset = [{"query": example} for example in generated_examples]
-    # brain.train(training_dataset)
-
+    # Save generated examples to a JSON file for manual review
     # import json
-    # generated_examples = None
-    # with open("generated_training_examples.json", "r") as f:
-    #     generated_examples = json.load(f)
-    # print(generated_examples)
+    # with open("generated_training_examples_ranked.json", "w") as f:
+    #     json.dump(generated_examples, f, indent=4)
+
+    # Use generated examples to train the agent
+    # You can also manually curate or modify the generated examples before training.
+    # generated_examples = ["How much interest will I earn on a $10,000 investment with a 7% annual interest rate over 5 years?"]
+    training_dataset = [{"query": example} for example in generated_examples]
+    brain.train(training_dataset)
 
 if __name__ == "__main__":
     main()
