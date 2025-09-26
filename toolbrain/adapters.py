@@ -75,6 +75,15 @@ class SmolAgentAdapter(BaseAgentAdapter):
     def get_tools(self) -> List[str]:
         """Returns the list of tool names available in the agent."""
         return [tool for tool in self.agent.tools]
+    
+    def get_callable_tools(self) -> List[Any]:
+        """
+        Returns the list of actual tool callables available in the agent.
+        
+        Returns:
+            List of tool callables from self.agent.tools.
+        """
+        return list(self.agent.tools.values())
 
     def run(self, query: str):
         """

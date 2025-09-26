@@ -98,7 +98,7 @@ def main() -> None:
     brain = Brain(agent=agent)
     generated_examples = brain.generate_training_examples(
         task_description=description,
-        num_examples=1,
+        num_examples=20,
         min_tool_calls=2,
         max_words=80,
         external_model=None,
@@ -107,13 +107,13 @@ def main() -> None:
         self_rank=True
     )
 
-    for example in generated_examples:
-        print(example)
-        print("")
+    # for example in generated_examples:
+    #     print(example)
+    #     print("")
 
-    # import json
-    # with open("generated_training_examples_ranked.json", "w") as f:
-    #     json.dump(generated_examples, f, indent=4)
+    import json
+    with open("generated_training_examples_ranked.json", "w") as f:
+        json.dump(generated_examples, f, indent=4)
 
     # generated_examples = ["How much interest will I earn on a $10,000 investment with a 7% annual interest rate over 5 years?"]
     # training_dataset = [{"query": example} for example in generated_examples]

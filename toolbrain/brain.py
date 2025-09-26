@@ -511,7 +511,7 @@ class Brain:
             validate_model(model)
 
             # By default, use agent's tools. If external_tools is provided, use external_tools instead.
-            tools = self.agent_adapter.get_tools() if not external_tools else external_tools
+            tools = self.agent_adapter.get_callable_tools() if not external_tools else external_tools
             validate_tools(tools)
             tools_description = tools_to_card(tools)
 
