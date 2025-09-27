@@ -20,13 +20,10 @@ try:
 except ImportError:
     litellm = None
 
-# --- PYDANTIC MODELS FOR STRUCTURED OUTPUT ---
 
 class CustomJudgeResponse(BaseModel):
     is_correct: bool
     explanation: str
-
-# --- Reward Function A: Metric-based (F1 Score) ---
 
 def _get_agent_final_answer(trace: Trace) -> str | None:
     """Helper function to extract the final answer from a trace."""
@@ -75,7 +72,6 @@ def reward_f1_score(trace: Trace, **kwargs: Any) -> float:
     f1 = 2 * (precision * recall) / (precision + recall)
     return f1
 
-# --- Reward Function B: ART-E Style Hybrid Judge ---
 
 def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
     """

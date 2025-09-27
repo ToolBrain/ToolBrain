@@ -1,5 +1,5 @@
 """
-Step 5: A standalone evaluation script that faithfully replicates the
+A standalone evaluation script that faithfully replicates the
 ART-E project's evaluation methodology and includes detailed logging.
 """
 
@@ -14,12 +14,11 @@ from tqdm import tqdm
 from peft import PeftModel
 from pydantic import BaseModel
 
-# Import from our use case and core modules
 from . import config
 from . import email_tools
-from toolbrain.models import UnslothModel 
-from smolagents import CodeAgent, TransformersModel
+from smolagents import CodeAgent
 from toolbrain.adapters import SmolAgentAdapter
+from toolbrain import Brain
 
 try:
     import litellm
@@ -28,13 +27,9 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s")
 
-# --- PYDANTIC MODELS FOR STRUCTURED OUTPUT ---
-
 class ArtJudgeResponse(BaseModel):
     is_correct: bool
     explanation: str
-
-# --- CORE FUNCTIONS ---
 
 def load_validation_dataset() -> List[Dict[str, Any]]:
     """Loads the validation dataset based on the main config."""
@@ -166,41 +161,21 @@ def run_evaluation(agent: CodeAgent, validation_data: List[Dict[str, Any]], outp
     }
     return metrics
 
-def load_trained_agent(model_dir: str) -> CodeAgent:
-    """
-    Loads a fine-tuned agent from a specified directory, using the `load_adapter` method.
-    """
-    logging.info(f"Loading fine-tuned agent from: {model_dir} using Unsloth.")
-
-    # base_model = TransformersModel(
-    #     model_id=config.BASE_MODEL_ID,
-    #     max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
-    #     max_new_tokens=config.MAX_NEW_TOKENS,
-    # )
-
-    base_model = UnslothModel(
-        model_id=config.BASE_MODEL_ID,
-        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
-        max_new_tokens=config.MAX_NEW_TOKENS,
-    )
-
-    base_model.model.load_adapter(model_dir)
-    
-    agent = CodeAgent(
-        tools=[email_tools.search_emails, email_tools.read_email],
-        model=base_model,
-        max_steps=config.MAX_AGENT_TURNS,
-    )
-    
-    logging.info("Agent loaded successfully.")
-    return agent
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a fine-tuned agent using ART-E's methodology.")
     parser.add_argument("--model_dir", type=str, required=True, help="Directory of the fine-tuned model.")
     args = parser.parse_args()
 
-    agent_to_evaluate = load_trained_agent(args.model_dir)
+    # Load trained agent directly
+    logging.info(f"Loading fine-tuned agent from: {args.model_dir}")
+    
+    agent_to_evaluate = Brain.load_agent(
+        model_dir=args.model_dir,
+        base_model_id=config.BASE_MODEL_ID,
+        tools=[email_tools.search_emails, email_tools.read_email],
+        max_steps=config.MAX_AGENT_TURNS,
+        use_unsloth=True
+    )
     validation_dataset = load_validation_dataset()
     
     final_metrics = run_evaluation(agent_to_evaluate, validation_dataset, args.model_dir)

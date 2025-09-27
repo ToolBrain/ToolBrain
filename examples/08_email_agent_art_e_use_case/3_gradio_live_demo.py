@@ -1,5 +1,5 @@
 """
-Step 4: Live Agent Demonstration with Gradio.
+Step 3: Live Agent Demonstration with Gradio.
 
 This script launches a Gradio web interface to provide a live, interactive
 demonstration of a fine-tuned email agent.
@@ -8,7 +8,7 @@ How to run from the command line (from the project root TOOLBRAIN/):
 # First, ensure you have a trained model saved in a directory.
 # Then, run the demo:
 python -m examples.08_email_agent_art_e_use_case.4_gradio_live_demo \
-    --model_dir ./models/art_e_grpo_toolbrain_judge
+    --model_dir ./models/art_e_grpo_art_judge
 """
 
 import argparse
@@ -17,44 +17,14 @@ import gradio as gr
 
 from . import config
 from . import email_tools
-from smolagents import CodeAgent, TransformersModel, stream_to_gradio
-from toolbrain.models import UnslothModel 
-from peft import PeftModel
+from smolagents import stream_to_gradio
+from toolbrain import Brain
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s")
 
 # --- Global variable to hold the loaded agent ---
 AGENT = None
-
-def load_trained_agent(model_dir: str) -> CodeAgent:
-    """
-    Loads a fine-tuned agent from a specified directory, using the `load_adapter` method.
-    """
-    logging.info(f"Loading fine-tuned agent from: {model_dir} using Unsloth.")
-
-    # base_model = TransformersModel(
-    #     model_id=config.BASE_MODEL_ID,
-    #     max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
-    #     max_new_tokens=config.MAX_NEW_TOKENS,
-    # )
-
-    base_model = UnslothModel(
-        model_id=config.BASE_MODEL_ID,
-        max_seq_length=config.MAX_TOOL_OUTPUT_CHARS + config.MAX_NEW_TOKENS,
-        max_new_tokens=config.MAX_NEW_TOKENS,
-    )
-
-    base_model.model.load_adapter(model_dir)
-    
-    agent = CodeAgent(
-        tools=[email_tools.search_emails, email_tools.read_email],
-        model=base_model,
-        max_steps=config.MAX_AGENT_TURNS,
-    )
-    
-    logging.info("Agent loaded successfully.")
-    return agent
 
 def chat_interface(message, history):
     """
@@ -91,7 +61,15 @@ def chat_interface(message, history):
 def main(args):
     """Launches the Gradio web interface."""
     global AGENT
-    AGENT = load_trained_agent(args.model_dir)
+    # Load trained agent directly
+    logging.info(f"Loading fine-tuned agent from: {args.model_dir}")
+    AGENT = Brain.load_agent(
+        model_dir=args.model_dir,
+        base_model_id=config.BASE_MODEL_ID,
+        tools=[email_tools.search_emails, email_tools.read_email],
+        max_steps=config.MAX_AGENT_TURNS,
+        use_unsloth=True
+    )
 
     # Create the Gradio interface
     demo = gr.ChatInterface(

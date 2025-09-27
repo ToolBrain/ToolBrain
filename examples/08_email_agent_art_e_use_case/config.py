@@ -64,7 +64,7 @@ GRPO_CONFIG = {
     "epsilon": 0.2,
     "beta": 0.04,
     "opt_steps": 4,
-    "lr": 1e-5,
+    "learning_rate": 1e-5,
     "max_grad_norm": 1.0,
     "chunk_len": 8,
     "num_group_members": 2,
@@ -76,7 +76,7 @@ GRPO_CONFIG = {
 
 DPO_CONFIG = {
     "beta": 0.1,
-    "lr": 2e-5,
+    "learning_rate": 2e-5,
     "max_grad_norm": 1.0,
     "chunk_len": 256,
     "num_group_members": 4,
