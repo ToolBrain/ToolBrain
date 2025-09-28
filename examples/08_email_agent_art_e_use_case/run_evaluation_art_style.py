@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from . import config
 from . import email_tools
+from .custom_rewards import _call_llm_judge_with_fallback
 from smolagents import CodeAgent
 from toolbrain.adapters import SmolAgentAdapter
 from toolbrain import Brain
@@ -64,31 +65,32 @@ def determine_if_correct_art_style(agent_answer: str, gold_answer: str, original
     if litellm is None: return False
     
     system_prompt = """You will be given a question and two different answers to the question, the correct answer and the answer given by an AI. Your job is to determine if the answer given by the AI is correct.
-    
-    Return your response in JSON format with:
-    - is_correct: true if the AI answer is semantically similar to the correct answer, false otherwise
-    - explanation: Brief reasoning for your decision"""
+
+You MUST respond with valid JSON in this exact format:
+{
+  "is_correct": true,
+  "explanation": "Brief reasoning for your decision"  
+}
+
+Set is_correct to true if the AI answer is semantically similar to the correct answer, false otherwise.
+Do not include any other text outside the JSON."""
     
     user_prompt = f"Question: {original_question}\nCorrect answer: {gold_answer}\nAI answer: {agent_answer}"
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     
     try:
-        response = litellm.completion(
-            model=config.JUDGE_MODEL_ID, 
-            messages=messages, 
-            response_format=ArtJudgeResponse,
-            temperature=0.0
+        # Use the universal LLM judge caller from custom_rewards
+        result = _call_llm_judge_with_fallback(
+            model=config.JUDGE_MODEL_ID,
+            messages=messages,
+            response_format=ArtJudgeResponse
         )
-        
-        # Parse the structured response
-        result_obj = response.choices[0].message.parsed
-        is_correct = result_obj.is_correct
-        judge_output = f"is_correct: {is_correct}, explanation: {result_obj.explanation}"
+        is_correct = result.is_correct
+        judge_output = f"is_correct: {is_correct}, explanation: {result.explanation}"
         
     except Exception as e:
         judge_output = f"ERROR: {e}"
         is_correct = False
-        result_obj = None
 
     # Detailed Logging for debugging
     with open(log_file_path, 'a', encoding='utf-8') as f:

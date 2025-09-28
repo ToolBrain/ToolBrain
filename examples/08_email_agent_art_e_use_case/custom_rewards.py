@@ -25,6 +25,173 @@ class CustomJudgeResponse(BaseModel):
     is_correct: bool
     explanation: str
 
+
+def _call_llm_judge_with_fallback(model: str, messages: list, response_format=None, max_retries: int = 3) -> CustomJudgeResponse:
+    """
+    Clean and reliable LLM judge caller with clear failure modes.
+    
+    Strategy:
+    1. Single API call with response_format (providers ignore if not supported)
+    2. Check for .parsed attribute (OpenAI structured output)
+    3. Fallback to regex-based JSON parsing from content (Gemini, Claude, etc.)
+    4. Fail clearly if parsing fails (no keyword guessing!)
+    
+    Benefits:
+    - Single API call to avoid quota waste
+    - Regex-based JSON extraction for accuracy
+    - Retry mechanism for network/quota errors
+    - Clear failure reporting instead of keyword guessing
+    - Better debugging with raw content logging
+    
+    Returns:
+        CustomJudgeResponse: Object with is_correct (bool) and explanation (str)
+    """
+    import time
+    import random
+    
+    # Retry logic for network/quota errors
+    for attempt in range(max_retries):
+        try:
+            # Single API call with response_format (providers ignore if not supported)
+            response = litellm.completion(
+                model=model,
+                messages=messages,
+                response_format=response_format,
+                temperature=0.0
+            )
+            
+            msg = response.choices[0].message
+            
+            # Strategy 1: Check for structured output (.parsed) - OpenAI
+            if hasattr(msg, 'parsed') and msg.parsed:
+                logging.info("✅ Using structured output (.parsed)")
+                return msg.parsed
+            
+            # Strategy 2: Parse JSON from content - Gemini, Claude, etc.
+            content = msg.content.strip()
+            logging.info(f"🔄 Falling back to JSON parsing from content: {content[:100]}...")
+            
+            # Clean content from markdown code blocks
+            content = _clean_json_content(content)
+            
+            # Try regex-based JSON extraction
+            json_result = _extract_json_with_regex(content)
+            if json_result:
+                logging.info("✅ Successfully parsed JSON with regex")
+                return json_result
+                
+            # Strategy 3: Clear failure instead of keyword guessing
+            logging.error(f"❌ Failed to parse response from {model}")
+            logging.error(f"Raw content: {content[:300]}...")
+            
+            return CustomJudgeResponse(
+                is_correct=False,
+                explanation=f"PARSE_ERROR: Model returned unparseable response. Expected JSON format but got: {content[:200]}..."
+            )
+                    
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            # Check if it's a retryable error
+            retryable_errors = ['503', '429', 'rate limit', 'quota', 'timeout', 'network', 'connection']
+            is_retryable = any(error_type in error_str for error_type in retryable_errors)
+            
+            if is_retryable and attempt < max_retries - 1:
+                # Exponential backoff with jitter
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                logging.warning(f"⚠️ Retryable error ({e}), retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+                continue
+            else:
+                # Non-retryable error or max retries reached
+                logging.error(f"❌ Error calling LLM Judge: {e} (attempt {attempt + 1}/{max_retries})")
+                return CustomJudgeResponse(is_correct=False, explanation=f"API_ERROR after {attempt + 1} attempts: {e}")
+    
+    return CustomJudgeResponse(is_correct=False, explanation="ERROR: Max retries exceeded")
+
+
+def _clean_json_content(content: str) -> str:
+    """
+    Clean content to extract JSON from markdown code blocks or other wrappers.
+    
+    Handles patterns like:
+    - ```json { ... } ```
+    - ``` { ... } ```
+    - **JSON:** { ... }
+    """
+    # Remove markdown code blocks
+    if content.startswith("```"):
+        # Find closing ```
+        end_marker = content.find("```", 3)
+        if end_marker != -1:
+            content = content[3:end_marker].strip()
+            # Remove language identifier (e.g., "json")
+            if content.lower().startswith("json"):
+                content = content[4:].strip()
+    
+    # Remove common prefixes
+    prefixes_to_remove = [
+        "**JSON:**", "**json:**", "JSON:", "json:", 
+        "Here's the JSON:", "Response:", "Result:"
+    ]
+    
+    for prefix in prefixes_to_remove:
+        if content.startswith(prefix):
+            content = content[len(prefix):].strip()
+            break
+    
+    return content
+
+
+def _extract_json_with_regex(content: str) -> CustomJudgeResponse | None:
+    """
+    Extract JSON using regex for more accurate parsing.
+    
+    Handles multiple JSON objects and nested braces properly.
+    
+    Returns:
+        CustomJudgeResponse if successful, None if failed
+    """
+    import json
+    import re
+    
+    # Try multiple regex patterns to find JSON
+    patterns = [
+        # Pattern 1: Complete JSON object (with potential nested objects)
+        r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',
+        # Pattern 2: More permissive - any content between outermost braces
+        r'\{.*?\}',
+        # Pattern 3: Multiline JSON with DOTALL flag
+        r'\{.*\}',
+    ]
+    
+    for i, pattern in enumerate(patterns):
+        try:
+            flags = re.DOTALL if i == 2 else 0
+            matches = re.findall(pattern, content, flags)
+            
+            for match in matches:
+                try:
+                    result_dict = json.loads(match)
+                    
+                    # Validate required fields
+                    if isinstance(result_dict, dict) and 'is_correct' in result_dict:
+                        is_correct = result_dict.get('is_correct', False)
+                        explanation = result_dict.get('explanation', 'No explanation provided')
+                        
+                        logging.info(f"Regex pattern {i+1} successfully extracted JSON")
+                        return CustomJudgeResponse(is_correct=is_correct, explanation=explanation)
+                        
+                except json.JSONDecodeError:
+                    continue  # Try next match
+                    
+        except Exception as e:
+            logging.debug(f"Regex pattern {i+1} failed: {e}")
+            continue
+    
+    logging.warning("All regex patterns failed to extract valid JSON")
+    return None
+
 def _get_agent_final_answer(trace: Trace) -> str | None:
     """Helper function to extract the final answer from a trace."""
     for turn in reversed(trace):
@@ -121,16 +288,13 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
             {"role": "user", "content": user_prompt},
         ]
 
-        response = litellm.completion(
+        # Use the universal LLM judge caller
+        result = _call_llm_judge_with_fallback(
             model=judge_model,
             messages=messages,
-            response_format=CustomJudgeResponse,
-            temperature=0.0
+            response_format=CustomJudgeResponse
         )
-        
-        # Parse structured response
-        result_obj = response.choices[0].message.parsed
-        is_correct = result_obj.is_correct
+        is_correct = result.is_correct
 
     except Exception as e:
         logging.error(f"Error calling LLM Judge for ART-style reward: {e}")

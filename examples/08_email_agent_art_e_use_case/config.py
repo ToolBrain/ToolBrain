@@ -21,6 +21,11 @@ from peft import LoraConfig
 BASE_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 
 # Define the model to be used as the LLM-as-a-Judge.
+# Supported models:
+# - OpenAI: "gpt-3.5-turbo", "gpt-4", "gpt-4o" (with structured output)
+# - Gemini: "gemini/gemini-1.5-flash", "gemini/gemini-2.5-flash-lite" (JSON parsing fallback)
+# - Claude: "anthropic/claude-3-sonnet-20240229" (JSON parsing fallback)
+# - Other LiteLLM supported models will use JSON parsing fallback
 JUDGE_MODEL_ID = "gemini/gemini-2.5-flash-lite"
 
 # Define paths for data and outputs.
