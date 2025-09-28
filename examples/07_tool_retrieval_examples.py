@@ -82,9 +82,10 @@ if __name__ == "__main__":
         model_id="Qwen/Qwen2.5-0.5B-Instruct",  # Use a smaller local model
         tools=[add, multiply, divide, subtract]
     )
+    
+    # Initialize the tool retriever
     retrieval_llm_instance = OpenAI(api_key=os.getenv("OPENAI_API_KEY")).chat.completions.create
     retrieval_llm_model = "gpt-4o-mini" 
-
     tool_retriever = ToolRetriever(llm_model=retrieval_llm_model, llm_instance=retrieval_llm_instance)
 
     # Initialize the training brain  
