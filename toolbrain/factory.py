@@ -70,7 +70,8 @@ def create_agent(
     *,  # Force keyword-only arguments
     use_unsloth: Optional[bool] = None,
     max_seq_length: int = 17408,  
-    max_new_tokens: int = 512,   
+    max_new_tokens: int = 512,
+    max_steps: int = 10,    
     **model_kwargs
 ):
     """
@@ -123,7 +124,7 @@ def create_agent(
     agent = CodeAgent(
         model=model,
         tools=tools,
-        max_steps=10  
+        max_steps=max_steps  
     )
     
     return agent
