@@ -90,6 +90,7 @@ def create_agent(
         use_unsloth: Force use/not use Unsloth (auto-detect if None)
         max_seq_length: Maximum sequence length for the model
         max_new_tokens: Maximum tokens to generate during inference
+        max_steps: Maximum reasoning steps per query
         **model_kwargs: Additional arguments passed to model creation
     
     Returns:
