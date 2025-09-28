@@ -12,6 +12,7 @@ import re
 from collections import deque
 from typing import Any, List, Dict, Union, Tuple, Optional, Callable
 
+from toolbrain.retriever import ToolRetriever
 import torch
 import numpy as np
 from textwrap import dedent
@@ -31,6 +32,7 @@ from .prompt import (
     validate_tools,
     tools_to_card,
 )
+from openai import OpenAI
 
 
 GRPOALiasNames = ["GRPO", "grpo"]
@@ -71,8 +73,9 @@ class Brain:
         # === Reward & Tools ===
         reward_func: Optional[Union[RewardFunction, BatchRewardFunction, RewardFunctionWrapper]] = None,
         enable_tool_retrieval: bool = False,
-        retrieval_topic: str = "general",       # Topic for tool retrieval
-        retrieval_guidelines: str = "",         # Custom guidelines for tool selection
+        retrieval_topic: str = "general",   # Topic for tool retrieval
+        retrieval_guidelines: str = "",   # Custom guidelines for tool selection
+        tool_retriever: Optional[ToolRetriever] = None, # Custom tool retriever
         
         # === Advanced (Optional) ===
         config: Optional[BaseConfig] = None  # For power users only
@@ -106,7 +109,7 @@ class Brain:
             enable_tool_retrieval: Enable intelligent tool filtering
             retrieval_topic: Domain/topic for tool retrieval (e.g., "bio medical", "data science")
             retrieval_guidelines: Custom guidelines for tool selection
-            
+            tool_retriever: Custom tool retriever
         Example:
             >>> # Simple GRPO training
             >>> brain = Brain(agent, algorithm="GRPO", learning_rate=1e-4, epsilon=0.2)
@@ -172,12 +175,18 @@ class Brain:
         self.enable_tool_retrieval = enable_tool_retrieval
         self.retrieval_topic = retrieval_topic
         self.retrieval_guidelines = retrieval_guidelines
-        
+        # self.tool_retriever = tool_retriever
         if enable_tool_retrieval:
-            self._setup_tool_retrieval()
+            if tool_retriever is None:
+                # Setup default tool retrieval components
+                self._setup_tool_retrieval()
+            else:
+                # Use custom tool retriever
+                self.tool_retriever = tool_retriever
+            
 
         else:
-            self.retriever = None
+            self.tool_retriever = None
         
         # Store original agent type for flexible return in get_agent()
         self.original_agent_type = type(agent)
@@ -193,14 +202,14 @@ class Brain:
         self.reward_buffer = deque(maxlen=10)
         
     def _setup_tool_retrieval(self):
-        """Setup tool retrieval components."""
+        """Setup default tool retrieval components."""
         try:
             from .retriever import ToolRetriever
-            self.retriever = ToolRetriever()
+            self.tool_retriever = ToolRetriever()
 
         except ImportError as e:
-
-            self.retriever = None
+            print(f"Error importing ToolRetriever: {e}")
+            self.tool_retriever = None
             self.enable_tool_retrieval = False
 
     def _setup_training(self):
@@ -253,24 +262,23 @@ class Brain:
         Returns:
             List of relevant Tool objects
         """
-        if not self.enable_tool_retrieval or self.retriever is None:
+        if not self.enable_tool_retrieval or self.tool_retriever is None:
             return self.agent.tools
         
         try:
             # Use retriever's direct method for smolagents tools
-            relevant_tools = self.retriever.select_relevant_tools(
+            relevant_tools = self.tool_retriever.select_relevant_tools(
                 query=query,
-                tools_list=self.agent.tools,
+                tools_list=list(self.agent.tools.items()),
                 topic=self.retrieval_topic,
-                guidelines=self.retrieval_guidelines or "Select tools that are directly relevant to accomplishing the task."
+                guidelines=self.retrieval_guidelines or "Select tools that are directly relevant to accomplishing the task.",
             )
-            
-
+            print(f"Relevant selected tools by tool retriever: {relevant_tools}")
             
             return relevant_tools if relevant_tools else self.agent.tools
             
         except Exception as e:
-
+            print(f"Error selecting relevant tools: {e.with_traceback()}")
             return self.agent.tools
 
     def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
@@ -318,13 +326,17 @@ class Brain:
 
         
         # Store original tools and apply tool retrieval if enabled
+        print(f"Calling get_trace with query: '{query[:50]}...'")
+        print(f"Enable tool retrieval: {self.enable_tool_retrieval}")
         original_tools = None
         if self.enable_tool_retrieval:
-
+            print(f"  🔍 Applying tool retrieval for query: '{query[:50]}...'")
+            print(f"  🔍 Tool retriever instance and model: {self.tool_retriever.llm_instance} and {self.tool_retriever.llm_model}")
             relevant_tools = self._retrieve_relevant_tools(query)
             
             # Backup original tools (list)
             original_tools = self.agent.tools.copy()
+            print(f"Original tools from agent: {original_tools}")
             
             # Use filtered tool objects
             if relevant_tools and len(relevant_tools) < len(original_tools):

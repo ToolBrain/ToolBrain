@@ -1,18 +1,24 @@
 import contextlib
 import re
 import os
+import traceback
 
-from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
+# from langchain_core.messages import HumanMessage
+# from langchain_openai import ChatOpenAI
+from openai import OpenAI   
+
+
 
 
 class ToolRetriever:
     """Retrieve tools from the tool registry."""
 
-    def __init__(self):
-        pass
+    def __init__(self, llm_model="gpt-4o-mini", llm_instance=None):
+        self.llm_model = llm_model
+        self.llm_instance = llm_instance
+        # pass
 
-    def select_relevant_tools(self, query: str, tools_list: list, llm=None, topic='general', guidelines="") -> list:
+    def select_relevant_tools(self, query: str, tools_list: list, topic='general', guidelines="1. Focus on relevance to the query.\n2. Be comprehensive in the selection.\n3. Avoid including irrelevant items.") -> list:
         """
         Select relevant tools from smolagents tools list.
         
@@ -27,23 +33,24 @@ class ToolRetriever:
             List of selected Tool objects
         """
         if not tools_list:
-            return []
+            return {}
             
         # Use existing prompt_based_retrieval logic
         resources = {"tools": tools_list}
-        selected = self.prompt_based_retrieval(query, resources, llm, topic, guidelines)
+        selected = self.prompt_based_retrieval(query, resources, topic, guidelines)
         
         # Return the actual tool objects
-        return selected.get("tools", [])
+        list_selected_tools = selected.get("tools", [])
+        selected_tools = {t[0]: t[1] for t in list_selected_tools}
+        return selected_tools
 
-    def prompt_based_retrieval(self, query: str, resources: dict, llm=None, topic='bio medial', guidelines="") -> dict:
+    def prompt_based_retrieval(self, query: str, resources: dict, topic='bio medial', guidelines="") -> dict:
         """Use a prompt-based approach to retrieve the most relevant resources for a query.
 
         Args:
             query: The user's query
             resources: A dictionary with keys 'tools', 'data_lake', and 'libraries',
                       each containing a list of available resources
-            llm: Optional LLM instance to use for retrieval (if None, will create a new one)
             topic: Topic that supported by agents of toolbrain
             guideline: Important or specific guideline related to a specific topic
 
@@ -52,6 +59,7 @@ class ToolRetriever:
 
         """
         # Create a prompt for the LLM to select relevant resources
+        tools_object = [t[1] if len(t) > 1 else t[0] for t in resources.get("tools", [])]
         prompt = """
             You play a role as an expert assistant in the {topic}. Your task is to select the relevant resources to help answer a user's query.
 
@@ -76,21 +84,22 @@ class ToolRetriever:
             {guidelines} 
         """.format(topic=topic, 
         query=query, 
-        tools=self._format_resources_for_prompt(resources.get("tools", [])),
+        tools=self._format_resources_for_prompt(tools_object),
         guidelines=guidelines or "1. Focus on relevance to the query.\n2. Be comprehensive in the selection.\n3. Avoid including irrelevant items.")
 
         # Use the provided LLM or create a new one
-        if llm is None:
-            llm = ChatOpenAI(model="gpt-4o")
-
-        # Invoke the LLM
-        if hasattr(llm, "invoke"):
-            # For LangChain-style LLMs
-            response = llm.invoke([HumanMessage(content=prompt)])
-            response_content = response.content
+        if self.llm_instance is None:
+            # print(f"Using default LLM OPENAI gpt-4o-mini: {self.llm_model}")
+            llm = OpenAI(api_key=os.getenv("OPENAI_API_KEY")).chat.completions.create
+            response = llm(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            response_content = str(response)
         else:
             # For other LLM interfaces
-            response_content = str(llm(prompt))
+            # print(f"Using provided LLM: {self.llm_instance}")
+            response_content = str(self.llm_instance(model=self.llm_model, messages=[{"role": "user", "content": prompt}]))  
 
         # Parse the response to extract the selected indices
         selected_indices = self._parse_llm_response(response_content)
@@ -101,6 +110,7 @@ class ToolRetriever:
                 resources["tools"][i] for i in selected_indices.get("tools", []) if i < len(resources.get("tools", []))
             ],
         }
+
 
         return selected_resources
 
