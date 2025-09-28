@@ -184,5 +184,199 @@ def main():
     brain_continued.train(more_training_data, num_iterations=1)
     print("✅ Continued training completed!")
 
+
+def advanced_agent_creation_examples():
+    """
+    ADVANCED: Complete User Control Over Agent Creation
+    
+    This section demonstrates how users have FULL CONTROL over agent creation.
+    ToolBrain's philosophy: Agent creation is entirely up to the user.
+    Brain only handles training strategies.
+    """
+    
+    # === OPTION 1: Factory Function (Convenience) ===
+    
+    # Simple factory usage
+    simple_agent = create_agent(
+        model_id="Qwen/Qwen2.5-0.5B-Instruct",
+        tools=[add, multiply],
+        max_steps=10,
+        use_unsloth=True
+    )
+    
+    # Advanced factory usage with custom parameters
+    advanced_factory_agent = create_agent(
+        model_id="Qwen/Qwen2.5-0.5B-Instruct", 
+        tools=[add, multiply],
+        max_steps=20,              # Custom agent behavior
+        use_unsloth=True,
+        max_seq_length=20000,      # Custom model config
+        max_new_tokens=1024,       # Custom model config
+    )
+    
+    # === OPTION 2: Manual Creation ===
+    
+    # User creates model manually with full control
+    from toolbrain.models import UnslothModel
+    from smolagents import CodeAgent, TransformersModel
+    
+    # Option 2a: Custom UnslothModel
+    custom_model = UnslothModel(
+        model_id="Qwen/Qwen2.5-0.5B-Instruct",
+        max_seq_length=25000,      # Custom length
+        max_new_tokens=2048,       # Custom generation
+        # Any other model parameters
+    )
+    
+    # User creates agent manually with full control
+    manual_agent = CodeAgent(
+        model=custom_model,
+        tools=[add, multiply],
+        max_steps=30,              # Custom agent steps
+    )
+    
+    # Option 2b: Standard TransformersModel for comparison
+    standard_model = TransformersModel(
+        model_id="Qwen/Qwen2.5-0.5B-Instruct", 
+        max_new_tokens=512
+    )
+    
+    standard_agent = CodeAgent(
+        model=standard_model,
+        tools=[add, multiply],
+        max_steps=15
+    )
+    
+    # === OPTION 3: External Agent Libraries ===
+    
+    # Note: These are conceptual examples - actual usage depends on library availability
+    
+    # Example with AutoGen (if available)
+    print("""
+    from autogen import ConversableAgent
+    from toolbrain.models import UnslothModel
+    
+    model = UnslothModel("Qwen/Qwen2.5-0.5B-Instruct")
+    autogen_agent = ConversableAgent(
+        name="math_assistant",
+        llm_config={"model": model},
+        tools=[add, multiply],
+        system_message="You are a specialized math assistant."
+    )
+    brain = Brain(autogen_agent, algorithm="GRPO")  # Brain accepts any agent!
+    """)
+    
+    # Example with CrewAI (if available)  
+    print("""
+    from crewai import Agent
+    from toolbrain.models import UnslothModel
+    
+    model = UnslothModel("Qwen/Qwen2.5-0.5B-Instruct")
+    crew_agent = Agent(
+        role="mathematician",
+        goal="Solve mathematical problems accurately", 
+        llm=model,
+        tools=[add, multiply],
+        backstory="Expert in arithmetic operations"
+    )
+    brain = Brain(crew_agent, algorithm="GRPO")  # Works with any agent library!
+    """)
+    
+    # === OPTION 4: Custom Agent Classes ===
+    
+    # User defines completely custom agent
+    class MyCustomMathAgent:
+        """
+        User-defined custom agent with specialized behavior.
+        This demonstrates complete freedom in agent design.
+        """
+        def __init__(self, model, tools, reasoning_style="step_by_step"):
+            self.model = model
+            self.tools = tools
+            self.reasoning_style = reasoning_style
+            self.memory = []
+            self.custom_behavior = "mathematical_reasoning"
+        
+        def run(self, query):
+            """Custom execution logic defined by user"""
+            self.memory.append(f"Processing: {query}")
+            
+            if self.reasoning_style == "step_by_step":
+                return self._step_by_step_reasoning(query)
+            else:
+                return self._direct_reasoning(query)
+        
+        def _step_by_step_reasoning(self, query):
+            """User's custom reasoning approach"""
+            steps = [
+                "1. Analyze the mathematical problem",
+                "2. Identify required operations", 
+                "3. Execute calculations step by step",
+                "4. Verify the result"
+            ]
+            # Custom logic here
+            return f"Step-by-step solution for: {query}"
+        
+        def _direct_reasoning(self, query):
+            """Alternative reasoning approach"""
+            return f"Direct solution for: {query}"
+        
+        def get_memory(self):
+            """Custom memory management"""
+            return self.memory
+    
+    # User creates custom agent instance
+    custom_model = UnslothModel("Qwen/Qwen2.5-0.5B-Instruct")
+    custom_agent = MyCustomMathAgent(
+        model=custom_model,
+        tools=[add, multiply], 
+        reasoning_style="step_by_step"
+    )
+    
+    # === OPTION 5: Enhanced Existing Agents ===
+    
+    # User extends existing agent with additional capabilities
+    class EnhancedCodeAgent(CodeAgent):
+        """
+        User extends smolagents CodeAgent with custom enhancements.
+        """
+        def __init__(self, model, tools, confidence_threshold=0.8):
+            super().__init__(model, tools)
+            self.confidence_threshold = confidence_threshold
+            self.execution_history = []
+        
+        def run(self, query):
+            """Enhanced run method with custom logic"""
+            result = super().run(query)  # Use base functionality
+            
+            # Add custom post-processing
+            self.execution_history.append({
+                "query": query,
+                "result": result,
+                "confidence": self._calculate_confidence(result)
+            })
+            
+            return result
+        
+        def _calculate_confidence(self, result):
+            """User's custom confidence calculation"""
+            # Custom logic to assess result confidence
+            return 0.9  # Placeholder
+        
+        def get_execution_history(self):
+            """Custom method for tracking execution"""
+            return self.execution_history
+    
+    # User creates enhanced agent
+    enhanced_model = UnslothModel("Qwen/Qwen2.5-0.5B-Instruct")
+    enhanced_agent = EnhancedCodeAgent(
+        model=enhanced_model,
+        tools=[add, multiply],
+        confidence_threshold=0.85
+    )
+
+
 if __name__ == "__main__":
     main()
+    
+    # advanced_agent_creation_examples()
