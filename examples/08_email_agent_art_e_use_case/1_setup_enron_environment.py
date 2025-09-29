@@ -58,7 +58,6 @@ CREATE INDEX idx_emails_date ON emails(date);
 CREATE INDEX idx_emails_message_id ON emails(message_id);
 CREATE INDEX idx_recipients_address ON recipients(recipient_address);
 
--- Tạo bảng ảo FTS5 để tìm kiếm toàn văn trên subject và body
 CREATE VIRTUAL TABLE emails_fts USING fts5(
     subject,
     body,
@@ -66,7 +65,6 @@ CREATE VIRTUAL TABLE emails_fts USING fts5(
     content_rowid='id'
 );
 
--- Các trigger để tự động đồng bộ dữ liệu giữa bảng 'emails' và 'emails_fts'
 CREATE TRIGGER emails_ai AFTER INSERT ON emails BEGIN
     INSERT INTO emails_fts (rowid, subject, body)
     VALUES (new.id, new.subject, new.body);
@@ -80,16 +78,11 @@ CREATE TRIGGER emails_au AFTER UPDATE ON emails BEGIN
     UPDATE emails_fts SET subject=new.subject, body=new.body WHERE rowid=old.id;
 END;
 
--- Nạp dữ liệu ban đầu vào bảng FTS
 INSERT INTO emails_fts (rowid, subject, body) SELECT id, subject, body FROM emails;
 """
 
-
-
-
 def download_dataset(repo_id: str) -> Dataset:
-    """Tải dataset từ Hugging Face Hub."""
-    logging.info(f"Đang tải dataset từ Hugging Face Hub: {repo_id}")
+    logging.info(f"Loading dataset from Hugging Face Hub: {repo_id}")
     expected_features = Features(
         {
             "message_id": Value("string"),
@@ -105,27 +98,27 @@ def download_dataset(repo_id: str) -> Dataset:
     )
     dataset_obj = load_dataset(repo_id, features=expected_features, split="train")
     if not isinstance(dataset_obj, Dataset):
-        raise TypeError(f"Lỗi: Kiểu dữ liệu mong đợi là Dataset, nhận được {type(dataset_obj)}")
+        raise TypeError(f"Error: Expected data type is Dataset, but received {type(dataset_obj)}")
     logging.info(
-        f"Tải thành công dataset '{repo_id}' với {len(dataset_obj)} bản ghi."
+        f"Successfully loaded dataset '{repo_id}' with {len(dataset_obj)} records."
     )
     return dataset_obj
 
 
 def create_database(db_path: str):
-    """Tạo database SQLite và các bảng."""
-    logging.info(f"Đang tạo database SQLite và các bảng tại: {db_path}")
+    """Create SQLite database and tables."""
+    logging.info(f"Creating SQLite database and tables at: {db_path}")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.executescript(SQL_CREATE_TABLES)
     conn.commit()
     conn.close()
-    logging.info("Tạo các bảng trong database thành công.")
+    logging.info("Successfully created tables in the database.")
 
 
 def populate_database(db_path: str, dataset: Dataset):
-    """Nạp dữ liệu từ dataset Hugging Face vào database."""
-    logging.info(f"Đang nạp dữ liệu vào database {db_path}...")
+    """Load data from Hugging Face dataset into the database."""
+    logging.info(f"Loading data into database {db_path}...")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
@@ -136,10 +129,10 @@ def populate_database(db_path: str, dataset: Dataset):
     
     conn.execute("BEGIN TRANSACTION;")
 
-    for email_data in tqdm(dataset, desc="Đang ghi emails vào DB"):
+    for email_data in tqdm(dataset, desc="Loading emails into DB"):
         assert isinstance(email_data, dict)
-        
-        # Trích xuất và làm sạch dữ liệu
+
+        # Extract and clean data
         date_obj: datetime = email_data["date"]
         date_str = date_obj.strftime("%Y-%m-%d %H:%M:%S") if date_obj else None
         
@@ -147,7 +140,7 @@ def populate_database(db_path: str, dataset: Dataset):
         cc_list = [str(addr) for addr in email_data.get("cc", []) if addr]
         bcc_list = [str(addr) for addr in email_data.get("bcc", []) if addr]
 
-        # Ghi vào bảng 'emails'
+        # Insert into 'emails' table
         cursor.execute(
             """
             INSERT INTO emails (message_id, subject, from_address, date, body, file_name)
@@ -181,44 +174,44 @@ def populate_database(db_path: str, dataset: Dataset):
 
     conn.commit()
     conn.close()
-    logging.info(f"Nạp thành công {record_count} bản ghi email.")
+    logging.info(f"Successfully loaded {record_count} email records.")
 
 
 def create_indexes_and_triggers(db_path: str):
-    """Tạo các chỉ mục và trigger trên database đã có dữ liệu."""
-    logging.info(f"Đang tạo indexes và triggers cho database: {db_path}...")
+    """Create indexes and triggers on the populated database."""
+    logging.info(f"Creating indexes and triggers for database: {db_path}...")
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.executescript(SQL_CREATE_INDEXES_TRIGGERS)
     conn.commit()
     conn.close()
-    logging.info("Tạo indexes và triggers thành công.")
+    logging.info("Successfully created indexes and triggers.")
 
 
 def generate_database_environment(overwrite: bool = False):
     """
-    Hàm chính điều phối toàn bộ quá trình tạo môi trường database.
+    Main function orchestrating the entire database environment creation process.
 
     Args:
-        overwrite: Nếu True, xóa và tạo lại database nếu đã tồn tại.
+        overwrite: If True, delete and recreate the database if it already exists.
     """
     logging.info(
-        f"Bắt đầu quá trình tạo môi trường database từ repo '{REPO_ID}' tại '{DB_PATH}'"
+        f"Starting database environment creation from repo '{REPO_ID}' at '{DB_PATH}'"
     )
-    logging.info(f"Ghi đè database nếu tồn tại: {overwrite}")
+    logging.info(f"Overwrite database if it exists: {overwrite}")
 
     db_dir = os.path.dirname(DB_PATH)
     if db_dir and not os.path.exists(db_dir):
-        logging.info(f"Đang tạo thư mục data: {db_dir}")
+        logging.info(f"Creating data directory: {db_dir}")
         os.makedirs(db_dir)
 
     if os.path.exists(DB_PATH):
         if overwrite:
-            logging.warning(f"Đang xóa database đã tồn tại: {DB_PATH}")
+            logging.warning(f"Deleting existing database: {DB_PATH}")
             os.remove(DB_PATH)
         else:
             logging.warning(
-                f"Database {DB_PATH} đã tồn tại và 'overwrite' là False. Bỏ qua quá trình tạo."
+                f"Database {DB_PATH} already exists and 'overwrite' is False. Skipping creation."
             )
             return
 
@@ -230,7 +223,7 @@ def generate_database_environment(overwrite: bool = False):
 
     create_indexes_and_triggers(DB_PATH)
 
-    logging.info(f"Hoàn tất quá trình tạo môi trường database tại {DB_PATH}.")
+    logging.info(f"Successfully created database environment at {DB_PATH}.")
 
 
 if __name__ == "__main__":
