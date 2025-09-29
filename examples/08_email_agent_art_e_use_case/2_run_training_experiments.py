@@ -27,6 +27,7 @@ import logging
 from datasets import load_dataset
 
 import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, os.path.dirname(__file__))
 import config
@@ -36,13 +37,17 @@ import email_tools
 from toolbrain import Brain, create_agent
 import json
 from tqdm import tqdm
-from .run_evaluation_art_style import run_evaluation as run_evaluation_art_style, load_validation_dataset
+from .run_evaluation_art_style import (
+    run_evaluation as run_evaluation_art_style,
+    load_validation_dataset,
+)
 
 
 # Setup logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s"
 )
+
 
 def load_and_prepare_dataset():
     """
@@ -84,21 +89,24 @@ def load_and_prepare_dataset():
     for item in train_dataset:
         system_prompt = config.SYSTEM_PROMPT_TEMPLATE.format(
             max_turns=config.MAX_AGENT_TURNS,
-            inbox_address=item['inbox_address'],
-            query_date=item['query_date']
+            inbox_address=item["inbox_address"],
+            query_date=item["query_date"],
         )
         full_query = f"{system_prompt}\nUser question: {item['question']}"
 
-        formatted_data.append({
-            "query": full_query,
-            "gold_answer": item["answer"],
-            "original_question": item["question"],
-        })
+        formatted_data.append(
+            {
+                "query": full_query,
+                "gold_answer": item["answer"],
+                "original_question": item["question"],
+            }
+        )
 
     logging.info(
         f"Dataset prepared with {len(formatted_data)} samples using the new detailed prompt."
     )
     return formatted_data
+
 
 def main(args):
     """Main function to orchestrate the training experiment."""
@@ -133,7 +141,6 @@ def main(args):
 
     else:
         raise ValueError(f"Invalid reward function: {args.reward_function}")
-
 
     # Load validation data once at the beginning
     logging.info("Loading validation dataset for periodic evaluation...")
@@ -173,14 +180,16 @@ def main(args):
         raise ValueError(f"Invalid algorithm: {args.algorithm}")
 
     logging.info(f"Starting training for {config.NUM_TRAIN_EPOCHS} epoch(s)...")
-    
+
     training_step_counter = 0
-    
+
     # Run initial evaluation at step 0 for a baseline
     logging.info("--- Running initial validation at step 0 ---")
     # Run evaluation using ART-E's style
-    metrics_art = run_evaluation_art_style(brain.get_agent(), validation_dataset, args.output_dir)
-    validation_history_art.append({'step': 0, **metrics_art})
+    metrics_art = run_evaluation_art_style(
+        brain.get_agent(), validation_dataset, args.output_dir
+    )
+    validation_history_art.append({"step": 0, **metrics_art})
     print(f"Validation (ART-Style) at step 0: {metrics_art}")
 
     for i in range(config.NUM_TRAIN_EPOCHS):
@@ -189,19 +198,27 @@ def main(args):
             training_step_counter += 1
 
             if training_step_counter % config.VALIDATION_INTERVAL == 0:
-                logging.info(f"--- Running validation at step {training_step_counter} ---")
+                logging.info(
+                    f"--- Running validation at step {training_step_counter} ---"
+                )
                 current_agent = brain.get_agent()
-                
+
                 # Run ART-E evaluation
-                metrics_art = run_evaluation_art_style(current_agent, validation_dataset, args.output_dir)
-                validation_history_art.append({'step': training_step_counter, **metrics_art})
-                print(f"Validation (ART-Style) at step {training_step_counter}: {metrics_art}")
+                metrics_art = run_evaluation_art_style(
+                    current_agent, validation_dataset, args.output_dir
+                )
+                validation_history_art.append(
+                    {"step": training_step_counter, **metrics_art}
+                )
+                print(
+                    f"Validation (ART-Style) at step {training_step_counter}: {metrics_art}"
+                )
 
     logging.info("--- Training finished! ---")
 
     # Save evaluation history
     path_art = os.path.join(args.output_dir, "validation_history_art.json")
-    with open(path_art, 'w') as f:
+    with open(path_art, "w") as f:
         json.dump(validation_history_art, f, indent=4)
 
     logging.info(f"Saving fine-tuned model to '{args.output_dir}'...")
