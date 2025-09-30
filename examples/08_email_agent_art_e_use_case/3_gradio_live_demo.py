@@ -42,17 +42,21 @@ def chat_interface(message, history):
     simulated_inbox = "gerald.nemec@enron.com"
     simulated_date = "2000-04-30"
 
-    full_prompt = config.SYSTEM_PROMPT_TEMPLATE.format(
+    system_prompt = config.SYSTEM_PROMPT_TEMPLATE.format(
         max_turns=config.MAX_AGENT_TURNS,
         inbox_address=simulated_inbox,
         query_date=simulated_date,
-        question=message # The user's question from the Gradio interface
     )
+    full_prompt = f"{system_prompt}\nUser question: {message}"
     
     logging.info(f"Constructed full prompt for agent:\n{full_prompt}")
     
     try:
-        yield from stream_to_gradio(AGENT.run(full_prompt, stream=True))
+        yield from stream_to_gradio(
+            agent=AGENT,
+            task=full_prompt,
+            reset_agent_memory=True
+        )
     except Exception as e:
         logging.error(f"An error occurred during agent execution: {e}")
         yield f"Sorry, an error occurred: {e}"
