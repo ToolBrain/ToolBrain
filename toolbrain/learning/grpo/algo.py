@@ -21,9 +21,14 @@ from .utils import Policy, build_inputs
 from .losses import grpo_loss
 from ...core_types import ChatSegment
 
-try:
-    import bitsandbytes as bnb
-except ImportError:
+# bitsandbytes only work for non-MacOS
+import platform
+if platform.system() != "Darwin":  # Darwin = macOS
+    try:
+        import bitsandbytes as bnb
+    except ImportError:
+        bnb = None
+else:
     bnb = None
 
 

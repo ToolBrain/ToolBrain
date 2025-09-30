@@ -1,7 +1,16 @@
 import copy
 import torch
 from torch.nn.utils import clip_grad_norm_
-import bitsandbytes as bnb
+import platform
+
+# bitsandbytes only work for non-MacOS
+if platform.system() != "Darwin":  # Darwin = macOS
+    try:
+        import bitsandbytes as bnb
+    except ImportError:
+        bnb = None
+else:
+    bnb = None
 from typing import List
 
 from toolbrain.core_types import ChatSegment

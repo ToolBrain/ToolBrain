@@ -9,15 +9,15 @@ and TWO different reward functions to compare their effectiveness:
 
 How to run from the command line (from the project root TOOLBRAIN/):
 1. Train with GRPO and F1 score reward:
-   python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments \
+   python -m examples.07_email_search_agent.2_run_training_experiments \
        --algorithm GRPO --reward_function f1 --output_dir ./models/art_e_grpo_f1
 
 2. Train with DPO and ART-E's judge style (default reward):
-   python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments \
+   python -m examples.07_email_search_agent.2_run_training_experiments \
        --algorithm DPO --output_dir ./models/art_e_dpo_art_judge
 
 3. Train with GRPO and ART-E's judge style (explicit):
-   python -m examples.08_email_agent_art_e_use_case.2_run_training_experiments \
+   python -m examples.07_email_search_agent.2_run_training_experiments \
        --algorithm GRPO --reward_function art_judge --output_dir ./models/art_e_grpo_art_judge
 """
 

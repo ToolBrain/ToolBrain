@@ -111,6 +111,7 @@ def main() -> None:
         "Generate task to learn to use simple finance tools such as calculating interest, converting currencies, or computing profit. "
         "The prompts should include varied numeric inputs, realistic edge cases (zero values, high rates), and require validation of outputs."
     )
+    # there is a helper function to create agent if you prefer to
     agent = create_agent(
         model_id="Qwen/Qwen2.5-0.5B-Instruct",
         tools=[

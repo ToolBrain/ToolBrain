@@ -1,7 +1,7 @@
 import os
 from toolbrain import Brain, create_agent
 from toolbrain.rewards import reward_exact_match
-from smolagents import tool
+from smolagents import tool, CodeAgent, TransformersModel
 from toolbrain.retriever import ToolRetriever
 from openai import OpenAI
 
@@ -61,41 +61,36 @@ def subtract(a: int, b: int) -> int:
     """
     return a - b
 
-# @tool
-# def calculate(a: int, b: int, operation: str) -> int:
-#     """
-#     Calculate the result of a mathematical operation.
-    
-#     Args:
-#         a: First integer
-#         b: Second integer
-#         operation: The operation to perform
-#     Returns:
-#         The result of the mathematical operation
-#     """
-#     return a + b if operation == "add" else a * b if operation == "multiply" else a / b if operation == "divide" else a - b if operation == "subtract" else None
 
 if __name__ == "__main__":
 
-    # Create agent with local model
-    agent = create_agent(
-        model_id="Qwen/Qwen2.5-0.5B-Instruct",  # Use a smaller local model
-        tools=[add, multiply, divide, subtract]
+    print("📥 Initializing TransformersModel...")
+    trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct",
+                                        max_new_tokens=128)
+
+    print("✅ TransformersModel initialized.")
+
+    print("🔧 Creating CodeAgent...")
+    agent = CodeAgent(
+        tools=[add, multiply, divide, subtract],
+        model=trainable_model,
+        max_steps=1
     )
-    
+    print("✅ Agent created.")
+
     # Initialize the tool retriever
     retrieval_llm_instance = OpenAI(api_key=os.getenv("OPENAI_API_KEY")).chat.completions.create
     retrieval_llm_model = "gpt-4o-mini" 
-    tool_retriever = ToolRetriever(llm_model=retrieval_llm_model, llm_instance=retrieval_llm_instance)
+    tool_retriever = ToolRetriever(llm_model=retrieval_llm_model,
+                                   llm_instance=retrieval_llm_instance,
+                                   retrieval_topic="mathematics",
+                                   retrieval_guidelines="Select only tools needed for mathematical calculations")
 
     # Initialize the training brain  
     brain = Brain(
         agent=agent,
         reward_func=reward_exact_match,
         algorithm="GRPO",
-        enable_tool_retrieval=True,
-        retrieval_topic="mathematics",
-        retrieval_guidelines="Select only tools/functions needed for mathematical calculations",
         tool_retriever=tool_retriever
     )
 

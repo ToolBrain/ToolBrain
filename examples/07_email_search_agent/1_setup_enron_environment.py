@@ -7,7 +7,7 @@
 # 1. Environment Setup (run only once):
 # This script will automatically download the Enron dataset 
 # and create the file enron_emails.db
-# python -m examples.08_email_agent_art_e_use_case.1_setup_enron_environment
+# python -m examples.07_email_search_agent.1_setup_enron_environment
 # ============================================================
 
 import sqlite3

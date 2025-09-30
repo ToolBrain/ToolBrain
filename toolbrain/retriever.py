@@ -13,12 +13,18 @@ from openai import OpenAI
 class ToolRetriever:
     """Retrieve tools from the tool registry."""
 
-    def __init__(self, llm_model="gpt-4o-mini", llm_instance=None):
+    def __init__(self, llm_model="gpt-4o-mini",
+                 llm_instance=None,
+                 retrieval_topic: str = "general",  # Topic for tool retrieval
+                 retrieval_guidelines: str = "1. Focus on relevance to the query.\n2. Be comprehensive in the selection.\n3. Avoid including irrelevant items.",  # Custom guidelines for tool selection
+                 ):
         self.llm_model = llm_model
         self.llm_instance = llm_instance
+        self.retrieval_topic = retrieval_topic
+        self.retrieval_guidelines = retrieval_guidelines
         # pass
 
-    def select_relevant_tools(self, query: str, tools_list: list, topic='general', guidelines="1. Focus on relevance to the query.\n2. Be comprehensive in the selection.\n3. Avoid including irrelevant items.") -> list:
+    def select_relevant_tools(self, query: str, tools_list: list) -> list:
         """
         Select relevant tools from smolagents tools list.
         
@@ -26,9 +32,7 @@ class ToolRetriever:
             query: User's query
             tools_list: List of smolagents Tool objects
             llm: Optional LLM instance
-            topic: Domain topic for expert selection
-            guidelines: Custom selection guidelines
-            
+
         Returns:
             List of selected Tool objects
         """
@@ -37,7 +41,7 @@ class ToolRetriever:
             
         # Use existing prompt_based_retrieval logic
         resources = {"tools": tools_list}
-        selected = self.prompt_based_retrieval(query, resources, topic, guidelines)
+        selected = self.prompt_based_retrieval(query, resources, self.retrieval_topic, self.retrieval_guidelines)
         
         # Return the actual tool objects
         list_selected_tools = selected.get("tools", [])

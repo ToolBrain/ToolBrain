@@ -9,7 +9,7 @@ evaluation methodologies from a single run.
 How to run from the command line (from the project root TOOLBRAIN/):
 
 # Example 1: Compare two different training runs (GRPO vs DPO)
-python -m examples.08_email_agent_art_e_use_case.4_plot_learning_curves \
+python -m examples.07_email_search_agent.4_plot_learning_curves \
     --results_files \
         ./models/run_grpo/validation_history_art.json \
         ./models/run_dpo/validation_history_art.json \

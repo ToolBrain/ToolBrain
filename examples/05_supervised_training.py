@@ -58,17 +58,8 @@ def main():
     print("🤖 User is creating their own agent...")
 
     print("📥 Initializing TransformersModel...")
-    trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct")
+    trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct", max_new_tokens=512)
     print("✅ TransformersModel initialized.")
-
-    # Get the tokenizer from inside the model
-    tokenizer = trainable_model.tokenizer
-
-    # If the tokenizer does not yet have a chat template, set a default one
-    if tokenizer.chat_template is None:
-        print("🔧 Setting a default chat template for the tokenizer.")
-        # This is a very common and safe template
-        tokenizer.chat_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{ '<|user|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'system' %}{{ '<|system|>\n' + message['content'] + '<|end|>\n' }}{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\n'  + message['content'] + '<|end|>\n' }}{% endif %}{% endfor %}"
 
     print("🔧 Creating CodeAgent...")
     my_agent = CodeAgent(
@@ -82,30 +73,10 @@ def main():
     brain = Brain(
         agent=my_agent,
         reward_func=reward_exact_match,
-        learning_algorithm="Supervised",
-        config={
-            "epsilon": 0.2,  # clipping parameter
-            "beta": 0.04,  # KL divergence penalty coefficient
-            "opt_steps": 3,  # Number of GRPO optimization steps per batch
-            "lr": 1e-5,  # Learning rate for optimizer
-            "max_grad_norm": 1.0,
-            "chunk_len": 128,  # If not None, get_per_token_logps will process in chunks
-            "lora_config": LoraConfig(  # If set, the RL will perform LoRA finetuning instead of full fine-tuning
-                r=8,  # LoRA rank
-                lora_alpha=16,  # scaling
-                target_modules=["q_proj", "v_proj"],  # the modules to apply LoRA
-                lora_dropout=0.1,
-                bias="none",
-                task_type="CAUSAL_LM",  # or "SEQ_2_SEQ_LM" for encoder-decoder
-            )
-        }
+        algorithm="Supervised"
     )
 
     brain.train(training_datasets, num_iterations=5)
-
-    # Get the trained agent
-    trained_agent = brain.get_agent()
-    print("\n🤖 Agent after training is ready to use.")
 
 
 if __name__ == "__main__":

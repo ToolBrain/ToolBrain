@@ -35,9 +35,9 @@ def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
                 return 1.0
         
         # Method 2: Check tool_output if final_answer() was called
-        tool_output = turn.get("tool_output")
-        if tool_output is not None:
-            tool_output_str = str(tool_output).strip()
+        action_output = turn.get("action_output")
+        if action_output is not None:
+            tool_output_str = str(action_output).strip()
             if tool_output_str == gold_str:
                 return 1.0
         
@@ -53,8 +53,8 @@ def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
         # Method 4: Check if tool_code contains final_answer() call and tool_output matches
         if parsed:
             tool_code = parsed.get("tool_code", "")
-            if "final_answer(" in tool_code and tool_output is not None:
-                if str(tool_output).strip() == gold_str:
+            if "final_answer(" in tool_code and action_output is not None:
+                if str(action_output).strip() == gold_str:
                     return 1.0
     
     return 0.0

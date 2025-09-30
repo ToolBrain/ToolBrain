@@ -15,9 +15,9 @@ The distillation process:
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ""))
 
-from smolagents import tool
+from smolagents import tool, TransformersModel, CodeAgent
 from toolbrain import create_agent, Brain, reward_tool_execution_success
 
 # --- 1. Define Tools ---
@@ -64,8 +64,8 @@ def calculate_power(base: float, exponent: int) -> float:
     """
     return base ** exponent
 
-# --- 2. Prepare Training Data ---
 
+# --- 2. Prepare Training Data ---
 training_dataset = [
     {
         "query": "Use the add tool to calculate 15 + 27",
@@ -98,11 +98,17 @@ def main():
 
     # --- 1. Create Student Agent ---
     print("\nCreating student agent (small model)...")
+    print("📥 Initializing TransformersModel...")
+    trainable_model = TransformersModel(model_id="Qwen/Qwen2.5-0.5B-Instruct",
+                                        max_new_tokens=128)
 
-    student_agent = create_agent(
-        model_id="Qwen/Qwen2.5-0.5B-Instruct",
+    print("✅ TransformersModel initialized.")
+
+    print("🔧 Creating CodeAgent...")
+    student_agent = CodeAgent(
         tools=[add, multiply, calculate_power],
-        use_unsloth=False  # Disable Unsloth
+        model=trainable_model,
+        max_steps=1
     )
     print("✅ Student agent created.")
 
@@ -113,13 +119,6 @@ def main():
         student_agent,                          # Agent instance
         algorithm="GRPO",               # Algorithm choice
         reward_func=reward_tool_execution_success  # Use tool success
-        # learning_rate=3e-5 (default)
-        # epsilon=0.2 (default)
-        # num_group_members=10 (default)
-        # batch_size=1 (default)
-        # max_grad_norm=1.0 (default)
-        # use_bitsandbytes=False (default)
-        # enable_tool_retrieval=False (default)
     )
     print("✅ Brain initialized.")
 
@@ -147,26 +146,7 @@ def main():
     # --- 5. Get the Trained Agent ---
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE!")
-    trained_agent = brain.get_agent()
-    print("✅ Trained agent is ready to use!")
 
-    # === OPTIONAL: Save/Load Distilled Model ===
-    # print("\nSave Distilled Model Demo (Optional)")
-    # print("-" * 40)
-
-    # # Save the distilled student model
-    # model_save_path = "./saved_distilled_model"
-    # print(f"Saving distilled model to: {model_save_path}")
-    # brain.save(model_save_path)
-    # print("✅ Distilled model saved successfully!")
-
-    # # The saved model can later be loaded for inference or continued training
-    # print("To load this model later, use:")
-    # print(f"   loaded_agent = Brain.load_agent(")
-    # print(f"       model_dir='{model_save_path}',")
-    # print(f"       base_model_id='Qwen/Qwen2.5-0.5B-Instruct',")
-    # print(f"       tools=[add, multiply, calculate_power]")
-    # print(f"   )")
 
 if __name__ == "__main__":
     main()

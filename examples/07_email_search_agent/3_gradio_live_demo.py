@@ -7,7 +7,7 @@ demonstration of a fine-tuned email agent.
 How to run from the command line (from the project root TOOLBRAIN/):
 # First, ensure you have a trained model saved in a directory.
 # Then, run the demo:
-python -m examples.08_email_agent_art_e_use_case.4_gradio_live_demo \
+python -m examples.07_email_search_agent.4_gradio_live_demo \
     --model_dir ./models/art_e_grpo_art_judge
 """
 
