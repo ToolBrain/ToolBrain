@@ -14,19 +14,47 @@ from pydantic import BaseModel
 def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
     """
     Reward 1.0 if the final answer exactly matches the provided gold_answer, else 0.0.
-    This version is robust against None values.
+    Handles multiple sources for final answers:
+    1. parsed_completion["final_answer"] - direct final answer field
+    2. tool_output - when final_answer() function call returns the result
+    3. model_completion - parsing "Final answer: X" from raw output
     """
     gold_answer = kwargs.get("gold_answer")
     if gold_answer is None:
         return 0.0
     
-    for turn in trace:
+    gold_str = str(gold_answer).strip()
+    
+    for turn in reversed(trace):
         parsed = turn.get("parsed_completion", {})
+        
+        # Method 1: Check parsed final_answer field (standard case)
         if parsed:
             final_answer = parsed.get("final_answer")
-            
-            if isinstance(final_answer, str):
-                if final_answer.strip() == str(gold_answer).strip():
+            if isinstance(final_answer, str) and final_answer.strip() == gold_str:
+                return 1.0
+        
+        # Method 2: Check tool_output if final_answer() was called
+        tool_output = turn.get("tool_output")
+        if tool_output is not None:
+            tool_output_str = str(tool_output).strip()
+            if tool_output_str == gold_str:
+                return 1.0
+        
+        # Method 3: Parse "Final answer: X" from model_completion
+        model_completion = turn.get("model_completion", "")
+        if "Final answer:" in model_completion:
+            parts = model_completion.split("Final answer:")
+            if len(parts) > 1:
+                extracted_answer = parts[-1].strip()
+                if extracted_answer == gold_str:
+                    return 1.0
+        
+        # Method 4: Check if tool_code contains final_answer() call and tool_output matches
+        if parsed:
+            tool_code = parsed.get("tool_code", "")
+            if "final_answer(" in tool_code and tool_output is not None:
+                if str(tool_output).strip() == gold_str:
                     return 1.0
     
     return 0.0
