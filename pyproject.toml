@@ -30,18 +30,58 @@ dependencies = [
     "peft>=0.17.0",
     "litellm",
     "google-generativeai",
-    "bitsandbytes",
-    "unsloth",
     "gradio",
     "datasets>=3.4.1,<4.0.0",
 ]
 
 [project.optional-dependencies]
+# --- OPTIONAL DEPENDENCIES (Extras) ---
+
+# Extra for core ML libraries
+torch = [
+    "torch",
+    "accelerate", # Often needed with torch and transformers
+]
+
+# Extra for Hugging Face Transformers
+transformers = [
+    "transformers",
+    "toolbrain[torch]", # This extra depends on the 'torch' extra
+]
+
+# 'unsloth' extra for GPU-accelerated training
+unsloth = [
+    "unsloth",
+    "bitsandbytes",
+    "xformers",
+    "toolbrain[transformers]", # Unsloth needs transformers and torch
+]
+
+# 'dev' extra for development and testing tools
 dev = [
     "pytest>=7.0.0",
     "black>=22.0.0",
     "isort>=5.0.0",
     "mypy>=1.0.0",
+]
+
+# Basic dependencies for running simple examples and plotting
+examples-base = [
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "toolbrain[transformers]", # Most examples will need transformers
+]
+
+# Full dependencies for running all examples, including advanced ones
+examples-full = [
+    "toolbrain[examples-base]",
+    "toolbrain[unsloth]", # Add the GPU-specific dependencies
+]
+
+# 'all' extra to install everything for a full development environment
+all = [
+    "toolbrain[dev, examples-full]", # 'all' now includes everything
 ]
 
 [project.urls]
