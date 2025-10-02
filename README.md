@@ -9,7 +9,7 @@ Support us by giving ToolBrain a ⭐ on GitHub.
 ## ✨ Key Features
 
 - **🤖 Learning algorithms**: Supports [GRPO](examples/02_lightgbm_hpo_training_with_grpo/run_hpo_training.py), [DPO](examples/04_lightgbm_hpo_training_with_dpo/run_hpo_training.py), and [supervised learning](examples/05_supervised_training.py).  
-- **🎯 Flexible rewards**: Define your own reward functions or use LLM-as-judge.  
+- **🎯 Flexible rewards**: Define your own [reward functions](examples/09_flexible_rewards.py) or use [LLM-as-judge](examples/10_llm_as_judge.py).  
 - **🔧 Tool management**: Scalable [retrieval](examples/06_tool_retrieval.py) for managing large tool collections.  
 - **📊 Knowledge distillation**: [Distill](examples/08_distillation.py) large teacher models into smaller student models for efficiency.  
 - **🚀 Zero-learn**: Automatically [generate training tasks](examples/03_generate_training_examples.py ).  
