@@ -25,7 +25,7 @@ pip install toolbrain
 ```
 
 
-### 4. Run the Example
+### Run the Example
 
 Run the complete example to see ToolBrain in action (please see under examples folder for more advanced usage examples):
 
