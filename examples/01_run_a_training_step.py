@@ -61,7 +61,7 @@ print("=" * 60)
 
 # 1. Create agent
 model = TransformersModel(
-    model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model if you want more accuracy and faster learning
+    model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model for better results
     max_new_tokens=128
 )
 
@@ -85,5 +85,5 @@ brain = Brain(
     reward_func=reward_exact_match
 )
 
-# 3. Train with the GRPO brain for 10 training GRPO steps
+# 3. Train the gaent with RL for 10 training GRPO steps
 brain.train(training_dataset, num_iterations=10)

@@ -71,7 +71,7 @@ training_dataset = [
 
 # 3. Create agent
 model = TransformersModel(
-    model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model if you want more accuracy and faster learning
+    model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model for better results
     max_new_tokens=128
 )
 
