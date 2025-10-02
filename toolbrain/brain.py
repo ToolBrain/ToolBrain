@@ -375,6 +375,12 @@ class Brain:
             if not traces:
                 print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
                 return
+            
+            # ✅ Check if all rewards are zero (no learning signal)
+            if all(reward == 0.0 for reward in rewards):
+                print(f"⚠️ All rewards are zero in this batch. Skipping training step to save compute.")
+                return
+                
         elif self.algorithm in SupervisedALiasNames:
             rl_inputs = query
 
