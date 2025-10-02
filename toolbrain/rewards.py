@@ -320,7 +320,10 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
         return []
 
     num_traces = len(traces)
-    query = kwargs.get("original_question")
+    if kwargs.get("original_question"):
+        query = kwargs.get("original_question")
+    else:
+        query = kwargs.get("query")
     judge_model = kwargs.get("judge_model")
 
     # Add validation to prevent None errors

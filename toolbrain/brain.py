@@ -73,7 +73,10 @@ class Brain:
         # === Reward & Tools ===
         reward_func: Optional[Union[RewardFunction, BatchRewardFunction, RewardFunctionWrapper]] = None,
         tool_retriever: Optional[ToolRetriever] = None, # Custom tool retriever
-        
+
+        # === LLM as judge ===
+        judge_model_id: str = None, # id of the judge model
+
         # === Advanced (Optional) ===
         config: Optional[BaseConfig] = None  # For power users only
     ):
@@ -117,7 +120,6 @@ class Brain:
             >>> brain = Brain(agent, algorithm="Supervised", learning_rate=5e-5)
             >>>
         """
-
         
         # Store core settings
         self.agent = agent
@@ -175,6 +177,9 @@ class Brain:
         
         # Legacy compatibility
         self.reward_buffer = deque(maxlen=10)
+
+        # judge model
+        self.judge_model_id = judge_model_id
 
     def _setup_tool_retrieval(self):
         """Setup default tool retrieval components."""
@@ -346,10 +351,17 @@ class Brain:
 
         try:
             # Add raw memory steps to reward_kwargs for advanced analysis (optional)
-            enhanced_reward_kwargs = {
-                **reward_kwargs,
-                "raw_memory_collection": raw_memory_collection  # List of raw memory steps for each trace
-            }
+            if self.judge_model_id is not None:
+                enhanced_reward_kwargs = {
+                    **reward_kwargs,
+                    "raw_memory_collection": raw_memory_collection,  # List of raw memory steps for each trace
+                    "judge_model": self.judge_model_id
+                }
+            else:
+                enhanced_reward_kwargs = {
+                    **reward_kwargs,
+                    "raw_memory_collection": raw_memory_collection  # List of raw memory steps for each trace
+                }
             rewards = self.reward_func.get_batch_scores(traces, **enhanced_reward_kwargs)
             for i, reward in enumerate(rewards):
                 print(f"      🎯 Trace {i + 1} Reward: {reward:.3f}")

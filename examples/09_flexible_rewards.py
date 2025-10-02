@@ -22,7 +22,6 @@ from toolbrain.rewards import (
     reward_exact_match,
     reward_tool_execution_success,
     reward_combined,
-    reward_llm_judge_via_ranking,
 )
 from toolbrain.core_types import Trace
 from typing import Any
@@ -68,24 +67,6 @@ training_dataset = [
     },
 ]
 
-# Dataset for LLM judge testing
-def get_judge_model():
-    """Auto-detect available LLM judge model based on API keys."""
-    if os.getenv("GEMINI_API_KEY"):
-        return "gemini/gemini-2.5-flash"  
-    elif os.getenv("OPENAI_API_KEY"):
-        return "gpt-4o"
-    else:
-        return None
-
-judge_dataset = [
-    {
-        "query": "Calculate 5 + 7 and explain why",
-        "original_question": "Calculate 5 + 7 and explain why",  
-        "judge_model": get_judge_model(),
-        "gold_answer": "12"  
-    }
-]
 
 # Custom combined reward function
 def custom_combined_reward(trace: Trace, **kwargs: Any) -> float:
@@ -131,29 +112,14 @@ print("✅ Agent created.")
 # )
 # brain_tool.train(training_dataset[:1], num_iterations=1)
 
-# # 4. Train with combined reward (exact match + tool success)
-# print("\n🎭 Training with combined reward (70% accuracy + 30% tool success)...")
-# brain_combined = Brain(
-#     agent,
-#     algorithm="GRPO",
-#     reward_func=custom_combined_reward
-# )
-# brain_combined.train(training_dataset[:1], num_iterations=1)
+# 4. Train with combined reward (exact match + tool success)
+print("\n🎭 Training with combined reward (70% accuracy + 30% tool success)...")
+brain_combined = Brain(
+    agent,
+    algorithm="GRPO",
+    reward_func=custom_combined_reward
+)
+brain_combined.train(training_dataset[:1], num_iterations=1)
 
-# 5. Train with LLM-as-a-Judge (flexible model selection)
-judge_model = get_judge_model()
-if judge_model:
-    print(f"\n🤖 Training with LLM-as-a-Judge ({judge_model})...")
-    brain_judge = Brain(
-        agent,
-        algorithm="GRPO",
-        reward_func=reward_llm_judge_via_ranking,
-        num_group_members=3
-    )
-    brain_judge.train(judge_dataset, num_iterations=1)
-else:
-    print("\n🤖 LLM Judge skipped (requires GEMINI_API_KEY or OPENAI_API_KEY)")
-    print("Set one of these environment variables:")
-    print("  export GEMINI_API_KEY='your-gemini-key'")
-    print("  export OPENAI_API_KEY='your-openai-key'")
+
 
