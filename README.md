@@ -99,9 +99,7 @@ print("✅ Agent created.")
 brain = Brain(
     agent,                          # Agent instance
     algorithm="GRPO",                # Algorithm choice
-    # Customised reward function is defined here, we use a mocking reward function with value 1.0
-    # for an exact gold_answer match and 0 otherwise, llm as judge can be used for automatic reward
-    reward_func=reward_exact_match
+    reward_func=reward_exact_match  # Customised reward function
 )
 
 # 3. Train with the GRPO brain for 10 training GRPO steps
