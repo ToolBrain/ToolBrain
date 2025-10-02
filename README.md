@@ -55,14 +55,7 @@ from toolbrain.rewards import reward_exact_match
 @tool
 def add(a: int, b: int) -> int:
     """
-    Add two integers.
-
-    Args:
-        a (int): First addend.
-        b (int): Second addend.
-
-    Returns:
-        int: Sum of a and b.
+    Add two integers..
     """
     return a + b
 
@@ -76,9 +69,6 @@ training_dataset = [
 ]
 
 
-print("🧠 ToolBrain Training Example with Reinforcement Learning")
-print("=" * 60)
-
 # 3. Create agent
 model = TransformersModel(
     model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model if you want more accuracy and faster learning
@@ -90,8 +80,6 @@ agent = CodeAgent(
     tools=[add],
     max_steps=1
 )
-
-print("✅ Agent created.")
 
 # 4. Create Brain
 
