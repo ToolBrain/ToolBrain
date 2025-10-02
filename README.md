@@ -115,7 +115,8 @@ The following plot illustrates how ToolBrain enhances the tool usage accuracy of
 ![GRPO learning curve](data/grpo.png)
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](opensource.org/licenses/MIT) file for details.
+This project is licensed under the MIT License - see the [LICENSE](https://opensource.org/licenses/MIT) for details.
+
 
 ## Contributors
 Quy Minh Le, Minh Sao Khue Luu, Khanh-Tung Tran, Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, Hoang Thanh Lam and Hoang D. Nguyen
