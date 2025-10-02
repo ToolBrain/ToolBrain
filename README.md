@@ -72,7 +72,14 @@ from toolbrain.rewards import reward_exact_match
 @tool
 def add(a: int, b: int) -> int:
     """
-    Add two integers..
+    Add two integers.
+
+    Args:
+        a (int): First addend.
+        b (int): Second addend.
+
+    Returns:
+        int: Sum of a and b.
     """
     return a + b
 
