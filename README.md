@@ -35,16 +35,15 @@ python examples/01_run_a_training_step.py
 
 This will:
 - Initialize a `CodeAgent` with simple math tools
-- Run the agent multiple times to collect execution traces
-- Evaluate each trace using a reward function
-- Pass the results to a mock RL GRPO algorithm for "training"
+- Define a customised reward function
+- Run the GRPO algorithm
 
 ## 📖 Usage Example
 
 Here's a minimal example of how to use ToolBrain. This script demonstrates simplified ToolBrain API:
 1. Create a smolagent CodeAgent
-2. Create brain with Brain() constructor (all parameters as keywords)
-3. Train with explicit, self-documenting parameters
+2. Create a brain with our main class Brain() 
+3. Train the agent with the GRPO algorithm
 
 
 ```python
