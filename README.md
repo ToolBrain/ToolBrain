@@ -122,7 +122,7 @@ Quy Minh Le, Minh Sao Khue Luu, Khanh-Tung Tran, Duc-Hai Nguyen, Hoang-Quoc-Viet
 
 
 ## References
-Please cite our work with the following bibtex:
+Please cite [our paper](https://arxiv.org/abs/2510.00023) with the following bibtex:
 ```
 @misc{le2025toolbrainflexiblereinforcementlearning,
       title={ToolBrain: A Flexible Reinforcement Learning Framework for Agentic Tools}, 
