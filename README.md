@@ -79,7 +79,7 @@ training_dataset = [
 print("🧠 ToolBrain Training Example with Reinforcement Learning")
 print("=" * 60)
 
-# 1. Create agent
+# 3. Create agent
 model = TransformersModel(
     model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model if you want more accuracy and faster learning
     max_new_tokens=128
@@ -93,15 +93,15 @@ agent = CodeAgent(
 
 print("✅ Agent created.")
 
-# 2. Create Brain
+# 4. Create Brain
 
 brain = Brain(
     agent,                          # Agent instance
     algorithm="GRPO",                # Algorithm choice
-    reward_func=reward_exact_match  # Customised reward function
+    reward_func=reward_exact_match  # A reward function, you can customise any python function as reward
 )
 
-# 3. Train with the GRPO brain for 10 training GRPO steps
+# 5. Train with the GRPO brain for 10 training GRPO steps
 brain.train(training_dataset, num_iterations=10)
 ```
 
