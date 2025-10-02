@@ -7,13 +7,6 @@ This script demonstrates the new, ultra-simplified ToolBrain API:
 3. Train with explicit, self-documenting parameters
 
 """
-import os
-import sys
-from dotenv import load_dotenv
-
-load_dotenv()
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from smolagents import tool, TransformersModel, CodeAgent
 from toolbrain import Brain
@@ -82,7 +75,6 @@ print("✅ Agent created.")
 
 # 2. Create Brain
 
-# === TYPICAL USAGE: Only 2 key parameters ===
 # This is a simplified version of Brain with default parameters settings, for advanced parameter settings please
 # refer to the documentation.
 brain = Brain(
