@@ -3,6 +3,7 @@
 ToolBrain is a lightweight open-source Python library for training **agentic systems** with effective tool usage and built-in reinforcement learning.  
 📚 Documentation & tutorials: [toolbrain.org](https://toolbrain.org)
 
+Support us by giving ToolBrain a ⭐ on GitHub.
 ## ✨ Key Features
 
 - **🤖 Learning algorithms**: Supports GRPO, DPO, and supervised learning.  
@@ -19,9 +20,25 @@ ToolBrain is a lightweight open-source Python library for training **agentic sys
 
 ### Installation
 
-From PyPI (when available):  
+Create conda env (optional)
+```bash
+conda create --name toolbrain python=3.12
+conda activate toolbrain
+```
+
+From PyPI:  
 ```bash
 pip install toolbrain
+```
+
+Or from the source code:
+```bash
+git clone git@github.com:ToolBrain/ToolBrain.git
+```
+
+Enter the cloned folder and type:
+```bash
+pip install .
 ```
 
 
@@ -92,11 +109,30 @@ brain = Brain(
 # 5. Train the agent with GRPO steps
 brain.train(training_dataset, num_iterations=10)
 ```
+ ### Results
+The following plot illustrates how ToolBrain enhances the tool usage accuracy of the small Qwen/Qwen2.5-0.5B-Instruct model after just 20 training steps using GRPO.
 
-
+![GRPO learning curve](data/grpo.png)
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Contributors
+Quy Minh Le, Minh Sao Khue Luu, Khanh-Tung Tran, Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, Hoang Thanh Lam and Hoang D. Nguyen
+
+
+## References
+Please cite our work with the following bibtex:
+```
+@misc{le2025toolbrainflexiblereinforcementlearning,
+      title={ToolBrain: A Flexible Reinforcement Learning Framework for Agentic Tools}, 
+      author={Quy Minh Le and Minh Sao Khue Luu and Khanh-Tung Tran and Duc-Hai Nguyen and Hoang-Quoc-Viet Pham and Quan Le and Hoang Thanh Lam and Hoang D. Nguyen},
+      year={2025},
+      eprint={2510.00023},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2510.00023}, 
+}
+```
 
 **Made with ❤️ by the ToolBrain Team** 
