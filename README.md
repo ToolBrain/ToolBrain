@@ -3,6 +3,8 @@
 ToolBrain is a lightweight open-source Python library for training **agentic systems** with effective tool usage and built-in reinforcement learning.  
 📚 Documentation & tutorials: [toolbrain.org](https://toolbrain.org)
 
+📚 Watch Introduction [Video](https://www.youtube.com/watch?v=8kEEV-vYjF8) 
+
 Support us by giving ToolBrain a ⭐ on GitHub.
 ## ✨ Key Features
 
