@@ -85,5 +85,5 @@ brain = Brain(
     reward_func=reward_exact_match
 )
 
-# 3. Train the gaent with RL for 10 training GRPO steps
+# 3. Train the agent with RL for 10 training GRPO steps
 brain.train(training_dataset, num_iterations=10)

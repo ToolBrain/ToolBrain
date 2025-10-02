@@ -68,7 +68,6 @@ def main():
     )
     print("✅ Agent created.")
 
-    # --- 4. Initialize Brain and Train ---
     # User only needs to pass their agent to Brain
     brain = Brain(
         agent=my_agent,

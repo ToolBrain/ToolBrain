@@ -89,7 +89,7 @@ brain = Brain(
     reward_func=reward_exact_match  # A reward function, you can customise any python function as reward
 )
 
-# 5. Train with the GRPO brain for 10 training GRPO steps
+# 5. Train the agent with GRPO steps
 brain.train(training_dataset, num_iterations=10)
 ```
 
