@@ -30,7 +30,7 @@ pip install toolbrain
 Run the complete example to see ToolBrain in action (please see under examples folder for more advanced usage examples):
 
 ```bash
-python examples/01_run_a_training_step.py
+python examples/01_run_hello_world.py
 ```
 
 This will:
