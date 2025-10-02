@@ -126,7 +126,7 @@ This project is licensed under the MIT License - see the [LICENSE](https://opens
 
 
 ## Contributors
-Quy Minh Le, Minh Sao Khue Luu, Khanh-Tung Tran, Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, Hoang Thanh Lam and Hoang D. Nguyen
+Quy Minh Le, Minh Sao Khue Luu, Khanh-Tung Tran, Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, [Hoang Thanh Lam](https://research.ibm.com/people/thanh-hoang) and [Hoang D. Nguyen](https://www.ucc.ie/en/compsci/people/harrynguyen/)
 
 
 ## References
