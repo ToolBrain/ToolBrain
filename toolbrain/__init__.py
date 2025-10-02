@@ -30,10 +30,20 @@ from .factory import (
 from .brain import Brain
 from .config import get_config, GRPOConfig, DPOConfig, SupervisedConfig, BaseConfig
 from .rewards import (
+    # Built-in single-trace reward functions
     reward_exact_match,
     reward_tool_execution_success,
+    reward_step_efficiency,
+    reward_behavior_uses_search_first,
+    reward_safety_no_os_system,
+    reward_combined,
+    
+    # LLM-as-a-Judge batch reward function
     reward_llm_judge_via_ranking,
-    create_reward_function
+    
+    # Utility classes and functions
+    RewardFunctionWrapper,
+    create_reward_function,
 )
 
 # Legacy/Advanced imports for backward compatibility
@@ -59,9 +69,19 @@ __all__ = [
     "BaseConfig",
     
     # === REWARD FUNCTIONS ===
+    # Built-in single-trace rewards
     "reward_exact_match",
     "reward_tool_execution_success", 
+    "reward_step_efficiency",
+    "reward_behavior_uses_search_first",
+    "reward_safety_no_os_system",
+    "reward_combined",
+    
+    # LLM-as-a-Judge batch reward
     "reward_llm_judge_via_ranking",
+    
+    # Utility classes
+    "RewardFunctionWrapper",
     "create_reward_function",
     
     # === ADVANCED/LEGACY ===

@@ -171,20 +171,31 @@ def _summarize_trace_for_judge(trace: Trace, query: str) -> str:
     # 2. Extract reasoning and action flow (without long tool outputs)
     summary_parts.append("Reasoning & Action Flow:")
     for i, turn in enumerate(trace, 1):
-        thought = turn.get("parsed_completion", {}).get("thought", "").strip()
-        tool_call = turn.get("parsed_completion", {}).get("tool_call", {})
+        if not turn or not isinstance(turn, dict):
+            continue
+            
+        parsed = turn.get("parsed_completion", {})
+        if not parsed:
+            continue
+            
+        thought = parsed.get("thought", "")
         
-        if thought:
-            summary_parts.append(f"  {i}. Thought: {thought[:200]}{'...' if len(thought) > 200 else ''}")
+        if thought is not None:
+            thought_str = str(thought).strip()
+            if thought_str:
+                summary_parts.append(f"  {i}. Thought: {thought_str[:200]}{'...' if len(thought_str) > 200 else ''}")
         
-        if tool_call:
+        tool_call = parsed.get("tool_call", {})
+        if tool_call and isinstance(tool_call, dict):
             tool_name = tool_call.get("tool_name", "unknown")
             # Summarize tool arguments without full content
             args = tool_call.get("arguments", {})
-            if args:
-                # Only show key argument names, not values
-                arg_summary = ", ".join(f"{k}: {str(v)[:50]}{'...' if len(str(v)) > 50 else ''}" for k, v in args.items())
-                summary_parts.append(f"     Action: {tool_name}({arg_summary})")
+            if args and isinstance(args, dict):
+                try:
+                    arg_summary = ", ".join(f"{k}: {str(v)[:50]}{'...' if len(str(v)) > 50 else ''}" for k, v in args.items() if v is not None)
+                    summary_parts.append(f"     Action: {tool_name}({arg_summary})")
+                except Exception:
+                    summary_parts.append(f"     Action: {tool_name}()")
             else:
                 summary_parts.append(f"     Action: {tool_name}()")
     
@@ -193,9 +204,12 @@ def _summarize_trace_for_judge(trace: Trace, query: str) -> str:
     # 3. Extract final answer
     final_answer = "No final answer provided"
     for turn in reversed(trace):
+        if not turn or not isinstance(turn, dict):
+            continue
+            
         parsed = turn.get("parsed_completion", {})
-        if parsed.get("final_answer"):
-            final_answer = parsed["final_answer"]
+        if parsed and parsed.get("final_answer"):
+            final_answer = str(parsed["final_answer"])
             break
     
     summary_parts.append(f"Final Answer: {final_answer}")
@@ -308,6 +322,12 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
     num_traces = len(traces)
     query = kwargs.get("original_question")
     judge_model = kwargs.get("judge_model")
+
+    # Add validation to prevent None errors
+    if query is None:
+        query = kwargs.get("query", "")  # Fallback to 'query' key
+    if not isinstance(query, str):
+        query = str(query) if query is not None else ""
 
     if not all([query, judge_model]):
         raise ValueError("`reward_llm_judge_via_ranking` requires 'query' and 'judge_model' in kwargs.")
