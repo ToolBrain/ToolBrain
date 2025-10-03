@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 from . import config
 from . import email_tools
-from .custom_rewards import _call_llm_judge_with_fallback
 from smolagents import CodeAgent
 from toolbrain.adapters import SmolAgentAdapter
 from toolbrain import Brain
@@ -26,14 +25,13 @@ try:
 except ImportError:
     litellm = None
 
+
+class JudgeResponse(BaseModel):
+    is_correct: bool  # True if answer is correct, False otherwise
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] - %(message)s"
 )
-
-
-class ArtJudgeResponse(BaseModel):
-    is_correct: bool
-    explanation: str
 
 
 def load_validation_dataset() -> List[Dict[str, Any]]:
@@ -58,7 +56,6 @@ def load_validation_dataset() -> List[Dict[str, Any]]:
 
     formatted_data = []
     for item in validation_dataset:
-        # Use the exact prompt structure from ART-E
         system_prompt = config.SYSTEM_PROMPT_TEMPLATE.format(
             max_turns=config.MAX_AGENT_TURNS,
             inbox_address=item["inbox_address"],
@@ -68,57 +65,65 @@ def load_validation_dataset() -> List[Dict[str, Any]]:
 
         formatted_data.append(
             {
-                "prompt": full_query,
+                "agent_prompt": full_query,
                 "gold_answer": item["answer"],
-                "original_question": item["question"],
+                "query": item["question"],
             }
         )
     return formatted_data
 
 
 def determine_if_correct_art_style(
-    agent_answer: str, gold_answer: str, original_question: str, log_file_path: str
+    agent_answer: str, gold_answer: str, query: str
 ) -> bool:
-    """ART-E's judge using structured output for reliability."""
+    """ART-E's judge using the exact original prompt for consistency."""
     if litellm is None:
         return False
 
-    system_prompt = """You will be given a question and two different answers to the question, the correct answer and the answer given by an AI. Your job is to determine if the answer given by the AI is correct.
-    
-    Return your response in JSON format with:
-    - is_correct: true if the AI answer is semantically similar to the correct answer, false otherwise
-    - explanation: Brief reasoning for your decision"""
+    # Use exact ART-E prompt for consistency
+    system_prompt = "You will be given an question and two different answers to the question, the correct answer and the answer given by an AI. Your job is to determine if the answer given by the AI is correct. Return True if the answer is semantically similar to the correct answer, and False otherwise. Return only the word True or False, no other text."
 
-    user_prompt = f"Question: {original_question}\nCorrect answer: {gold_answer}\nAI answer: {agent_answer}"
+    user_prompt = f"Question: {query}\nCorrect answer: {gold_answer}\nAI answer: {agent_answer}"
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
     
     try:
-        # Use the universal LLM judge caller from custom_rewards
-        result = _call_llm_judge_with_fallback(
+        response = litellm.completion(
             model=config.JUDGE_MODEL_ID,
             messages=messages,
-            response_format=ArtJudgeResponse
+            response_format=JudgeResponse,
+            temperature=0.0,
         )
-        is_correct = result.is_correct
-        judge_output = f"is_correct: {is_correct}, explanation: {result.explanation}"
+        
+        msg = response.choices[0].message
+
+        try:
+            result_obj = msg.parsed
+            if result_obj:
+                if isinstance(result_obj, dict):
+                    is_correct = result_obj.get("is_correct", False)
+                else:
+                    is_correct = getattr(result_obj, "is_correct", False)
+            else:
+                is_correct = False
+        except (AttributeError, KeyError):
+            try:
+                content = msg.content.strip() if msg.content else ""
+                
+                # Try to parse JSON from content
+                if content.startswith('{') and content.endswith('}'):
+                    import json
+                    parsed_content = json.loads(content)
+                    is_correct = parsed_content.get("is_correct", False)
+                else:
+                    # Original fallback for plain text
+                    is_correct = content.lower() == "true"
+            except (AttributeError, json.JSONDecodeError):
+                is_correct = False
+        
+        return is_correct
         
     except Exception as e:
-        judge_output = f"ERROR: {e}"
-        is_correct = False
-
-    # Detailed Logging for debugging
-    with open(log_file_path, 'a', encoding='utf-8') as f:
-        log_entry = {
-            "question": original_question,
-            "agent_answer": agent_answer,
-            "gold_answer": gold_answer,
-            "judge_prompt": messages,
-            "judge_output_structured": judge_output,
-            "verdict": "CORRECT" if is_correct else "INCORRECT"
-        }
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-        
-    return is_correct
+        return False
 
 def run_evaluation(
     agent: CodeAgent, validation_data: List[Dict[str, Any]], output_dir: str
@@ -129,46 +134,52 @@ def run_evaluation(
     """
     adapter = SmolAgentAdapter(agent=agent, config={})
 
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    log_file_path = os.path.join(output_dir, config.JUDGE_LOG_FILENAME)
-
-    # Initialize the log file for this evaluation run
-    with open(log_file_path, "w", encoding="utf-8") as f:
-        f.write(f"--- Judge Log for Evaluation Run ---\n")
-
     num_correct, num_incorrect, num_no_answer, total_turns = 0, 0, 0, 0
 
     for item in tqdm(validation_data, desc="Running Validation", leave=False):
-        trace, _, _ = adapter.run(item["prompt"])
+        trace, _, _ = adapter.run(item["agent_prompt"])
 
         agent_answer = "I don't know"  # Default value
         for turn in reversed(trace):
-            if turn.get("parsed_completion", {}).get("final_answer"):
-                agent_answer = turn["parsed_completion"]["final_answer"]
+            parsed = turn.get("parsed_completion", {})
+            
+            # Method 1: Check parsed final_answer field (standard case)
+            if parsed and parsed.get("final_answer"):
+                agent_answer = parsed["final_answer"]
                 break
+            
+            # Method 2: Check tool_output if final_answer() was called
+            action_output = turn.get("action_output")
+            if action_output is not None:
+                agent_answer = str(action_output)
+                break
+            
+            # Method 3: Parse "Final answer: X" from model_completion
+            model_completion = turn.get("model_completion", "")
+            if "Final answer:" in model_completion:
+                parts = model_completion.split("Final answer:")
+                if len(parts) > 1:
+                    agent_answer = parts[-1].strip()
+                    break
+            
+            # Method 4: Check if tool_code contains final_answer() call and tool_output matches
+            if parsed:
+                tool_code = parsed.get("tool_code", "")
+                if "final_answer(" in tool_code and action_output is not None:
+                    agent_answer = str(action_output)
+                    break
 
-        # Replicating ART-E's logic strictly
         # Step 1: Rule-based check for "I don't know".
         is_no_answer = agent_answer.strip().lower() == "i don't know"
 
         if is_no_answer:
             num_no_answer += 1
-            with open(log_file_path, "a", encoding="utf-8") as f:
-                log_entry = {
-                    "question": item["original_question"],
-                    "agent_answer": agent_answer,
-                    "verdict": "NO_ANSWER",
-                }
-                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
         else:
             # Step 2: LLM-based check if the agent attempted an answer.
             if determine_if_correct_art_style(
                 agent_answer,
                 item["gold_answer"],
-                item["original_question"],
-                log_file_path,
+                item["query"],
             ):
                 num_correct += 1
             else:

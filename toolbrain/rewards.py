@@ -149,8 +149,7 @@ except ImportError:
 # --- PYDANTIC MODELS FOR STRUCTURED OUTPUT ---
 
 class JudgeRankingResponse(BaseModel):
-    ranking: List[int]  # e.g., [1, 3, 2] 
-    reasoning: str  # Brief explanation of ranking decision
+    ranking: List[int]  # e.g., [1, 3, 2]
 
 # --- TRACE SUMMARIZATION FUNCTIONS ---
 
@@ -201,16 +200,39 @@ def _summarize_trace_for_judge(trace: Trace, query: str) -> str:
     
     summary_parts.append("")
     
-    # 3. Extract final answer
+    # 3. Extract final answer using multiple methods
     final_answer = "No final answer provided"
     for turn in reversed(trace):
         if not turn or not isinstance(turn, dict):
             continue
             
         parsed = turn.get("parsed_completion", {})
+        
+        # Method 1: Check parsed final_answer field (standard case)
         if parsed and parsed.get("final_answer"):
             final_answer = str(parsed["final_answer"])
             break
+        
+        # Method 2: Check action_output if final_answer() was called
+        action_output = turn.get("action_output")
+        if action_output is not None:
+            final_answer = str(action_output)
+            break
+        
+        # Method 3: Parse "Final answer: X" from model_completion
+        model_completion = turn.get("model_completion", "")
+        if "Final answer:" in model_completion:
+            parts = model_completion.split("Final answer:")
+            if len(parts) > 1:
+                final_answer = parts[-1].strip()
+                break
+        
+        # Method 4: Check if tool_code contains final_answer() call and action_output matches
+        if parsed:
+            tool_code = parsed.get("tool_code", "")
+            if "final_answer(" in tool_code and action_output is not None:
+                final_answer = str(action_output)
+                break
     
     summary_parts.append(f"Final Answer: {final_answer}")
     
@@ -252,35 +274,6 @@ def _format_traces_for_ranking(traces: List[Trace], query: str = "") -> str:
     
     return "\n\n".join(parts)
 
-def _parse_ranking_from_llm(response_text: str, num_traces: int) -> Optional[List[int]]:
-    """
-    Extracts a ranked list of trajectory IDs from the judge's response.
-    This version is more robust and looks for a list-like structure.
-    """
-    try:
-        # 1. Find a list-like structure, e.g., [3, 1, 2] or (3, 1, 2)
-        list_match = re.search(r'[\(\[]\s*(\d+(?:\s*,\s*\d+)*)\s*[\)\]]', response_text)
-        
-        if list_match:
-            # 2. If found, only process the numbers inside
-            numbers_str = list_match.group(1)
-            ranked_ids = [int(n.strip()) for n in numbers_str.split(',')]
-        else:
-            # 3. If not found, revert to the old method of finding all numbers
-            numbers = re.findall(r'\d+', response_text)
-            ranked_ids = [int(n) for n in numbers]
-
-        # 4. Validate the result
-        #    Add check for duplicate numbers
-        if (len(ranked_ids) == num_traces and 
-            all(1 <= i <= num_traces for i in ranked_ids) and
-            len(set(ranked_ids)) == num_traces):
-            return ranked_ids
-        else:
-            return None
-    except Exception:
-        return None
-
 def _convert_ranking_to_scores(ranking: List[int], num_traces: int) -> List[float]:
     """Converts a ranked list of IDs into a list of scores using linear spacing."""
     scores = [0.0] * num_traces
@@ -307,7 +300,7 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
     Args:
         traces: The list of traces to be judged.
         **kwargs: Must include:
-            - original_question: The original user query.
+            - query: The user's natural question.
             - judge_model: The model ID for the judge (e.g., "gemini/gemini-1.5-flash").
 
     Returns:
@@ -320,19 +313,18 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
         return []
 
     num_traces = len(traces)
-    query = kwargs.get("original_question")
+    query = kwargs.get("query")
     judge_model = kwargs.get("judge_model")
 
     if not all([query, judge_model]):
-        raise ValueError("`reward_llm_judge_via_ranking` requires 'original_question' and 'judge_model' in kwargs.")
+        raise ValueError("`reward_llm_judge_via_ranking` requires 'query' and 'judge_model' in kwargs.")
 
     # 1. Prepare prompt for judge with query context
     traces_str = _format_traces_for_ranking(traces, query)
     system_prompt = """You are a fair and impartial AI performance evaluator. Your task is to rank multiple agent trajectories based on their quality.
     
     Return your response in JSON format with:
-    - ranking: A list of trajectory IDs ranked from BEST to WORST (e.g., [3, 1, 2])
-    - reasoning: Brief explanation of your ranking decision"""
+    - ranking: A list of trajectory IDs ranked from BEST to WORST (e.g., [3, 1, 2])"""
     
     user_prompt = f"""User Query:
 {query}
@@ -356,21 +348,30 @@ Review all trajectories above. Rank them from BEST to WORST based on correctness
             temperature=0.0
         )
         
-        # Parse structured response
         try:
-            # Try structured parsing first
             result_obj = response.choices[0].message.parsed
-            ranking = result_obj.ranking
-            reasoning = result_obj.reasoning
+            if result_obj:
+                if isinstance(result_obj, dict):
+                    ranking = result_obj.get("ranking", [])
+                else:
+                    ranking = getattr(result_obj, "ranking", [])
+            else:
+                ranking = []
         except (AttributeError, KeyError):
-            # Fallback: parse JSON from content
-            import json
-            content = response.choices[0].message.content
-            result_dict = json.loads(content)
-            ranking = result_dict.get("ranking", [])
-            reasoning = result_dict.get("reasoning", "No reasoning provided")
-        
-
+            try:
+                content = response.choices[0].message.content
+                content = content.strip() if content else ""
+                
+                # Try to parse JSON from content
+                if content.startswith('{') and content.endswith('}'):
+                    import json
+                    parsed_content = json.loads(content)
+                    ranking = parsed_content.get("ranking", [])
+                else:
+                    # No valid JSON structure found
+                    ranking = []
+            except (AttributeError, json.JSONDecodeError):
+                ranking = []
         
         # 3. Validate ranking
         

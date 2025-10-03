@@ -9,9 +9,9 @@ and keep the core library clean of use-case-specific logic.
 import re
 from collections import Counter
 from typing import List, Dict, Any
+from pydantic import BaseModel
 
 from toolbrain.core_types import Trace
-from pydantic import BaseModel
 import logging
 import config
 
@@ -21,211 +21,37 @@ except ImportError:
     litellm = None
 
 
-class CustomJudgeResponse(BaseModel):
-    is_correct: bool
-    explanation: str
-
-
-def _call_llm_judge_with_fallback(
-    model: str, messages: list, response_format=None, max_retries: int = 3
-) -> CustomJudgeResponse:
-    """
-    Clean and reliable LLM judge caller with clear failure modes.
-
-    Strategy:
-    1. Single API call with response_format (providers ignore if not supported)
-    2. Check for .parsed attribute (OpenAI structured output)
-    3. Fallback to regex-based JSON parsing from content (Gemini, Claude, etc.)
-    4. Fail clearly if parsing fails (no keyword guessing!)
-
-    Benefits:
-    - Single API call to avoid quota waste
-    - Regex-based JSON extraction for accuracy
-    - Retry mechanism for network/quota errors
-    - Clear failure reporting instead of keyword guessing
-    - Better debugging with raw content logging
-
-    Returns:
-        CustomJudgeResponse: Object with is_correct (bool) and explanation (str)
-    """
-    import time
-    import random
-
-    # Retry logic for network/quota errors
-    for attempt in range(max_retries):
-        try:
-            # Single API call with response_format (providers ignore if not supported)
-            response = litellm.completion(
-                model=model,
-                messages=messages,
-                response_format=response_format,
-                temperature=0.0,
-            )
-
-            msg = response.choices[0].message
-
-            # Strategy 1: Check for structured output (.parsed) - OpenAI
-            if hasattr(msg, "parsed") and msg.parsed:
-                return msg.parsed
-
-            # Strategy 2: Parse JSON from content - Gemini, Claude, etc.
-            content = msg.content.strip()
-
-            # Clean content from markdown code blocks
-            content = _clean_json_content(content)
-
-            # Try regex-based JSON extraction
-            json_result = _extract_json_with_regex(content)
-            if json_result:
-                return json_result
-
-            # Strategy 3: Clear failure instead of keyword guessing
-            logging.error(f"Failed to parse response from {model}")
-            logging.error(f"Raw content: {content[:300]}...")
-
-            return CustomJudgeResponse(
-                is_correct=False,
-                explanation=f"PARSE_ERROR: Model returned unparseable response. Expected JSON format but got: {content[:200]}...",
-            )
-
-        except Exception as e:
-            error_str = str(e).lower()
-
-            # Check if it's a retryable error
-            retryable_errors = [
-                "503",
-                "429",
-                "rate limit",
-                "quota",
-                "timeout",
-                "network",
-                "connection",
-            ]
-            is_retryable = any(
-                error_type in error_str for error_type in retryable_errors
-            )
-
-            if is_retryable and attempt < max_retries - 1:
-                # Exponential backoff with jitter
-                wait_time = (2**attempt) + random.uniform(0, 1)
-                logging.warning(
-                    f"⚠️ Retryable error ({e}), retrying in {wait_time:.1f}s... (attempt {attempt + 1}/{max_retries})"
-                )
-                time.sleep(wait_time)
-                continue
-            else:
-                # Non-retryable error or max retries reached
-                logging.error(
-                    f"❌ Error calling LLM Judge: {e} (attempt {attempt + 1}/{max_retries})"
-                )
-                return CustomJudgeResponse(
-                    is_correct=False,
-                    explanation=f"API_ERROR after {attempt + 1} attempts: {e}",
-                )
-
-    return CustomJudgeResponse(
-        is_correct=False, explanation="ERROR: Max retries exceeded"
-    )
-
-
-def _clean_json_content(content: str) -> str:
-    """
-    Clean content to extract JSON from markdown code blocks or other wrappers.
-
-    Handles patterns like:
-    - ```json { ... } ```
-    - ``` { ... } ```
-    - **JSON:** { ... }
-    """
-    # Remove markdown code blocks
-    if content.startswith("```"):
-        # Find closing ```
-        end_marker = content.find("```", 3)
-        if end_marker != -1:
-            content = content[3:end_marker].strip()
-            # Remove language identifier (e.g., "json")
-            if content.lower().startswith("json"):
-                content = content[4:].strip()
-
-    # Remove common prefixes
-    prefixes_to_remove = [
-        "**JSON:**",
-        "**json:**",
-        "JSON:",
-        "json:",
-        "Here's the JSON:",
-        "Response:",
-        "Result:",
-    ]
-
-    for prefix in prefixes_to_remove:
-        if content.startswith(prefix):
-            content = content[len(prefix) :].strip()
-            break
-
-    return content
-
-
-def _extract_json_with_regex(content: str) -> CustomJudgeResponse | None:
-    """
-    Extract JSON using regex for more accurate parsing.
-
-    Handles multiple JSON objects and nested braces properly.
-
-    Returns:
-        CustomJudgeResponse if successful, None if failed
-    """
-    import json
-    import re
-
-    # Try multiple regex patterns to find JSON
-    patterns = [
-        # Pattern 1: Complete JSON object (with potential nested objects)
-        r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}",
-        # Pattern 2: More permissive - any content between outermost braces
-        r"\{.*?\}",
-        # Pattern 3: Multiline JSON with DOTALL flag
-        r"\{.*\}",
-    ]
-
-    for i, pattern in enumerate(patterns):
-        try:
-            flags = re.DOTALL if i == 2 else 0
-            matches = re.findall(pattern, content, flags)
-
-            for match in matches:
-                try:
-                    result_dict = json.loads(match)
-
-                    # Validate required fields
-                    if isinstance(result_dict, dict) and "is_correct" in result_dict:
-                        is_correct = result_dict.get("is_correct", False)
-                        explanation = result_dict.get(
-                            "explanation", "No explanation provided"
-                        )
-
-                        logging.info(f"Regex pattern {i+1} successfully extracted JSON")
-                        return CustomJudgeResponse(
-                            is_correct=is_correct, explanation=explanation
-                        )
-
-                except json.JSONDecodeError:
-                    continue  # Try next match
-
-        except Exception as e:
-            logging.debug(f"Regex pattern {i+1} failed: {e}")
-            continue
-
-    logging.warning("All regex patterns failed to extract valid JSON")
-    return None
+class JudgeResponse(BaseModel):
+    is_correct: bool  # True if answer is correct, False otherwise
 
 
 def _get_agent_final_answer(trace: Trace) -> str | None:
     """Helper function to extract the final answer from a trace."""
     for turn in reversed(trace):
-        parsed_completion = turn.get("parsed_completion", {})
-        if parsed_completion and parsed_completion.get("final_answer"):
-            return parsed_completion["final_answer"]
+        parsed = turn.get("parsed_completion", {})
+        
+        # Method 1: Check parsed final_answer field (standard case)
+        if parsed and parsed.get("final_answer"):
+            return parsed["final_answer"]
+        
+        # Method 2: Check tool_output if final_answer() was called
+        action_output = turn.get("action_output")
+        if action_output is not None:
+            return str(action_output)
+        
+        # Method 3: Parse "Final answer: X" from model_completion
+        model_completion = turn.get("model_completion", "")
+        if "Final answer:" in model_completion:
+            parts = model_completion.split("Final answer:")
+            if len(parts) > 1:
+                return parts[-1].strip()
+        
+        # Method 4: Check if tool_code contains final_answer() call and tool_output matches
+        if parsed:
+            tool_code = parsed.get("tool_code", "")
+            if "final_answer(" in tool_code and action_output is not None:
+                return str(action_output)
+    
     return None
 
 
@@ -291,7 +117,7 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
         return 0.0
 
     # 1. Extract necessary information
-    query = kwargs.get("original_question")
+    query = kwargs.get("query")
     gold_answer = kwargs.get("gold_answer")
     judge_model = kwargs.get("judge_model", config.JUDGE_MODEL_ID)
     agent_answer = _get_agent_final_answer(trace)
@@ -305,14 +131,9 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
     if not agent_answer:
         return 0.0
 
-    # 3. Call the LLM Judge to determine correctness
     is_correct = False
     try:
-        system_prompt = """You are an AI evaluator. Your job is to determine if an AI's answer is correct.
-        
-        Return your response in JSON format with:
-        - is_correct: true if the AI answer is semantically similar to the correct answer, false otherwise
-        - explanation: Brief reasoning for your decision"""
+        system_prompt = "You will be given an question and two different answers to the question, the correct answer and the answer given by an AI. Your job is to determine if the answer given by the AI is correct. Return True if the answer is semantically similar to the correct answer, and False otherwise. Return only the word True or False, no other text."
 
         user_prompt = f"Question: {query}\nCorrect answer: {gold_answer}\nAI answer: {agent_answer}"
 
@@ -321,13 +142,38 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
             {"role": "user", "content": user_prompt},
         ]
 
-        # Use the universal LLM judge caller
-        result = _call_llm_judge_with_fallback(
-            model=judge_model, 
-            messages=messages, 
-            response_format=CustomJudgeResponse
+        response = litellm.completion(
+            model=judge_model,
+            messages=messages,
+            response_format=JudgeResponse,
+            temperature=0.0,
         )
-        is_correct = result.is_correct
+        
+        msg = response.choices[0].message
+
+        try:
+            result_obj = msg.parsed
+            if result_obj:
+                if isinstance(result_obj, dict):
+                    is_correct = result_obj.get("is_correct", False)
+                else:
+                    is_correct = getattr(result_obj, "is_correct", False)
+            else:
+                is_correct = False
+        except (AttributeError, KeyError):
+            try:
+                content = msg.content.strip() if msg.content else ""
+                
+                # Try to parse JSON from content
+                if content.startswith('{') and content.endswith('}'):
+                    import json
+                    parsed_content = json.loads(content)
+                    is_correct = parsed_content.get("is_correct", False)
+                else:
+                    # Original fallback for plain text
+                    is_correct = content.lower() == "true"
+            except (AttributeError, json.JSONDecodeError):
+                is_correct = False
 
     except Exception as e:
         logging.error(f"Error calling LLM Judge for ART-style reward: {e}")
@@ -337,8 +183,7 @@ def reward_art_style_judge(trace: Trace, **kwargs: Any) -> float:
     if is_correct:
         reward = 1.0
 
-        MAX_TURNS = 10
-        efficiency_bonus = 0.1 * (1 - len(trace) / MAX_TURNS)
+        efficiency_bonus = 0.1 * (1 - len(trace) / config.MAX_AGENT_TURNS)
         reward += max(0, efficiency_bonus)
 
         return reward

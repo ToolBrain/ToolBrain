@@ -96,9 +96,9 @@ def load_and_prepare_dataset():
 
         formatted_data.append(
             {
-                "query": full_query,
+                "agent_prompt": full_query,
                 "gold_answer": item["answer"],
-                "original_question": item["question"],
+                "query": item["question"],
             }
         )
 
@@ -194,7 +194,7 @@ def main(args):
 
     for i in range(config.NUM_TRAIN_EPOCHS):
         for example in tqdm(training_data, desc=f"Epoch {i+1}"):
-            brain.train_step(query=example["query"], reward_kwargs=example)
+            brain.train_step(query=example["agent_prompt"], reward_kwargs=example)
             training_step_counter += 1
 
             if training_step_counter % config.VALIDATION_INTERVAL == 0:
