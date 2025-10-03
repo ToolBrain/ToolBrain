@@ -53,7 +53,7 @@ judge_model_id = get_judge_model()
 
 judge_dataset = [
     {
-        "query": "Please use the provided tool add(a: int, b: int) to calculate sum of 5 and 7. Do not use anything else than that function.",
+        "original_question": "Please use the provided tool add(a: int, b: int) to calculate sum of 5 and 7. Do not use anything else than that function.",
         "gold_answer": "12"
     }
 ]

@@ -307,7 +307,7 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
     Args:
         traces: The list of traces to be judged.
         **kwargs: Must include:
-            - query: The original user query.
+            - original_question: The original user query.
             - judge_model: The model ID for the judge (e.g., "gemini/gemini-1.5-flash").
 
     Returns:
@@ -320,20 +320,11 @@ def reward_llm_judge_via_ranking(traces: List[Trace], **kwargs: Any) -> List[flo
         return []
 
     num_traces = len(traces)
-    if kwargs.get("original_question"):
-        query = kwargs.get("original_question")
-    else:
-        query = kwargs.get("query")
+    query = kwargs.get("original_question")
     judge_model = kwargs.get("judge_model")
 
-    # Add validation to prevent None errors
-    if query is None:
-        query = kwargs.get("query", "")  # Fallback to 'query' key
-    if not isinstance(query, str):
-        query = str(query) if query is not None else ""
-
     if not all([query, judge_model]):
-        raise ValueError("`reward_llm_judge_via_ranking` requires 'query' and 'judge_model' in kwargs.")
+        raise ValueError("`reward_llm_judge_via_ranking` requires 'original_question' and 'judge_model' in kwargs.")
 
     # 1. Prepare prompt for judge with query context
     traces_str = _format_traces_for_ranking(traces, query)
