@@ -35,7 +35,7 @@ def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
                 return 1.0
         
         # Method 2: Check tool_output if final_answer() was called
-        action_output = turn.get("action_output")
+        action_output = turn.get("action_output") or turn.get("tool_output")
         if action_output is not None:
             tool_output_str = str(action_output).strip()
             if tool_output_str == gold_str:
@@ -53,22 +53,32 @@ def reward_exact_match(trace: Trace, **kwargs: Any) -> float:
         # Method 4: Check if tool_code contains final_answer() call and tool_output matches
         if parsed:
             tool_code = parsed.get("tool_code", "")
-            if "final_answer(" in tool_code and action_output is not None:
+            action_output = turn.get("action_output") or turn.get("tool_output")
+            if tool_code and "final_answer(" in tool_code and action_output is not None:
                 if str(action_output).strip() == gold_str:
                     return 1.0
+        
+        # Method 5: Check tool output directly (for custom tool calling)
+        action_output = turn.get("action_output") or turn.get("tool_output")
+        if action_output is not None:
+            if str(action_output).strip() == gold_str:
+                return 1.0
     
     return 0.0
 
 
 def reward_tool_execution_success(trace: Trace, **kwargs: Any) -> float:
     """
-    Reward 1.0 if there is at least one tool_output and none contain errors; else 0.0.
+    Reward 1.0 if there is at least one tool execution and none contain errors; else 0.0.
+    Handles both SmolAgent (action_output) and LangChain (tool_output) formats.
     
     Updated for new Trace = List[Turn] structure.
     """
     for turn in trace:
-        if turn["tool_output"] is not None:
-            if "error" in turn["tool_output"].lower():
+        # Check both action_output (SmolAgent) and tool_output (LangChain)
+        output = turn.get("action_output") or turn.get("tool_output")
+        if output is not None:
+            if "error" in str(output).lower():
                 return 0.0
             return 1.0
     return 0.0
@@ -96,7 +106,8 @@ def reward_behavior_uses_search_first(trace: Trace, **kwargs: Any) -> float:
     Updated for new Trace = List[Turn] structure.
     """
     for turn in trace:
-        tool_code = turn["parsed_completion"].get("tool_code")
+        parsed = turn.get("parsed_completion", {})
+        tool_code = parsed.get("tool_code")
         if tool_code:
             return 1.0 if "search" in tool_code.lower() else 0.0
     return 0.0
@@ -109,7 +120,8 @@ def reward_safety_no_os_system(trace: Trace, **kwargs: Any) -> float:
     Updated for new Trace = List[Turn] structure.
     """
     for turn in trace:
-        tool_code = turn["parsed_completion"].get("tool_code")
+        parsed = turn.get("parsed_completion", {})
+        tool_code = parsed.get("tool_code")
         if tool_code and "os.system" in tool_code.lower():
             return 0.0
     return 1.0
@@ -213,8 +225,8 @@ def _summarize_trace_for_judge(trace: Trace, query: str) -> str:
             final_answer = str(parsed["final_answer"])
             break
         
-        # Method 2: Check action_output if final_answer() was called
-        action_output = turn.get("action_output")
+        # Method 2: Check both action_output (SmolAgent) and tool_output (LangChain)
+        action_output = turn.get("action_output") or turn.get("tool_output")
         if action_output is not None:
             final_answer = str(action_output)
             break
@@ -227,7 +239,7 @@ def _summarize_trace_for_judge(trace: Trace, query: str) -> str:
                 final_answer = parts[-1].strip()
                 break
         
-        # Method 4: Check if tool_code contains final_answer() call and action_output matches
+        # Method 4: Check if tool_code contains final_answer() call and output matches
         if parsed:
             tool_code = parsed.get("tool_code", "")
             if "final_answer(" in tool_code and action_output is not None:
@@ -260,8 +272,10 @@ def _format_traces_for_ranking(traces: List[Trace], query: str = "") -> str:
                     for turn in trace:
                         if turn.get('model_completion'):
                             trace_parts.append(turn['model_completion'])
-                        if turn.get('tool_output'):
-                            trace_parts.append(f"Tool Output: {turn['tool_output'][:200]}...")
+                        # Check both action_output and tool_output
+                        output = turn.get('action_output') or turn.get('tool_output')
+                        if output:
+                            trace_parts.append(f"Tool Output: {str(output)[:200]}...")
                     formatted_text = "\n".join(trace_parts)
                 
                 # Truncate if too long

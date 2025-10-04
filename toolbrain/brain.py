@@ -21,6 +21,7 @@ from .learning.supervised.algo import SupervisedAlgorithm
 from .rewards import RewardFunctionWrapper, create_reward_function, reward_exact_match
 from .core_types import Trace, RewardFunction, BatchRewardFunction
 from .adapters import BaseAgentAdapter, SmolAgentAdapter
+from .langchain_adapter_v2 import LangChainAdapter 
 from .learning.dpo import DPOAlgorithm, make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
@@ -33,6 +34,11 @@ from .prompt import (
 )
 from openai import OpenAI
 from .factory import create_agent
+
+try:
+    from langgraph.graph.state import CompiledStateGraph
+except ImportError:
+    CompiledStateGraph = None # Để code không bị lỗi nếu chưa cài LangChain
 
 
 GRPOALiasNames = ["GRPO", "grpo"]
@@ -51,6 +57,7 @@ class Brain:
     def __init__(
         self,
         agent: Any,
+        trainable_model: Optional[Any] = None,
         *,  # Force all parameters after agent to be keyword-only
         # === Core Training Settings ===
         algorithm: str = "GRPO", 
@@ -123,6 +130,7 @@ class Brain:
         
         # Store core settings
         self.agent = agent
+        self.trainable_model_override = trainable_model
         self.algorithm = algorithm
         self.batch_size = batch_size
         
@@ -170,7 +178,7 @@ class Brain:
         self.original_agent_type = type(agent)
         
         # Initialize adapter and algorithm
-        self.agent_adapter = self._get_adapter_for_agent(agent)
+        self.agent_adapter = self._get_adapter_for_agent(agent, trainable_model)
 
         # Get trainable model from adapter and setup training
         self._setup_training()
@@ -258,17 +266,27 @@ class Brain:
             print(f"Error selecting relevant tools: {e.with_traceback()}")
             return self.agent.tools
 
-    def _get_adapter_for_agent(self, agent_instance: Any) -> BaseAgentAdapter:
+    def _get_adapter_for_agent(self, agent_instance: Any, trainable_model: Optional[Any]) -> BaseAgentAdapter:
         """
-        Factory method to automatically select the appropriate adapter for the given agent.
+        Factory method to automatically select the appropriate adapter.
         """
-        if isinstance(agent_instance, CodeAgent):
-            # Convert config to dict format for adapter (backward compatibility)
-            config_dict = self.config.to_dict() if hasattr(self.config, 'to_dict') else vars(self.config)
+        config_dict = self.config.to_dict() if hasattr(self.config, 'to_dict') else vars(self.config)
+
+        if CompiledStateGraph and isinstance(agent_instance, CompiledStateGraph):
+            model_to_use = trainable_model
+            if model_to_use is None:
+                 raise ValueError("For LangChain agents, you must provide the 'trainable_model' argument to the Brain constructor.")
+            
+            # Try to extract tools to pass explicitly
+            tools = []
+            if hasattr(self, '_langchain_tools'):
+                tools = self._langchain_tools
+            
+            return LangChainAdapter(agent=agent_instance, trainable_model=model_to_use, config=config_dict, tools=tools)
+        
+        elif isinstance(agent_instance, CodeAgent):
             return SmolAgentAdapter(agent=agent_instance, config=config_dict)
-        # Future example:
-        # elif isinstance(agent_instance, AutoGenAgent):
-        #     return AutoGenAdapter(agent=agent_instance)
+        
         else:
             raise TypeError(f"Agent type '{type(agent_instance).__name__}' is not supported yet.")
 
