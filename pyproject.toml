@@ -32,6 +32,10 @@ dependencies = [
     "google-generativeai",
     "gradio",
     "datasets>=3.4.1,<4.0.0",
+    "langchain>=1.0.0a10",
+    "langchain-huggingface",
+    "langgraph",
+    "langchain_core"
 ]
 
 [project.optional-dependencies]

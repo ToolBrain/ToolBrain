@@ -3,7 +3,7 @@
 ToolBrain is a lightweight open-source Python library for training **agentic systems** with effective tool usage and built-in reinforcement learning.  
 📚 Documentation & tutorials: [toolbrain.org](https://toolbrain.org)
 
-📚 Watch Introduction [Video](https://www.youtube.com/watch?v=8kEEV-vYjF8) 
+📚 Watch Introduction [Video](https://www.youtube.com/watch?v=LhYiIHTRw7E) 
 
 Support us by giving ToolBrain a ⭐ on GitHub.
 ## ✨ Key Features
@@ -26,11 +26,6 @@ Create conda env (optional)
 ```bash
 conda create --name toolbrain python=3.12
 conda activate toolbrain
-```
-
-From PyPI:  
-```bash
-pip install toolbrain
 ```
 
 Or from the source code:

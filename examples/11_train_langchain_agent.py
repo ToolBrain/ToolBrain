@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from toolbrain import Brain, create_huggingface_chat_model
 from toolbrain.rewards import reward_exact_match
 
+
 try:
     from langchain.agents import create_agent
     from langchain_core.tools import tool
@@ -54,7 +55,8 @@ def main():
         model_id=model_id,
         max_new_tokens=128,
         temperature=0.1,
-        do_sample=True
+        do_sample=True,
+        device_map="cpu",
     )
     print("✅ HuggingFace model initialized with custom tool calling support.")
 
