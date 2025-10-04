@@ -148,8 +148,8 @@ def run_evaluation(
                 agent_answer = parsed["final_answer"]
                 break
             
-            # Method 2: Check tool_output if final_answer() was called
-            action_output = turn.get("action_output")
+            # Method 2: Check both action_output (SmolAgent) and tool_output (LangChain)
+            action_output = turn.get("action_output") or turn.get("tool_output")
             if action_output is not None:
                 agent_answer = str(action_output)
                 break
@@ -162,7 +162,7 @@ def run_evaluation(
                     agent_answer = parts[-1].strip()
                     break
             
-            # Method 4: Check if tool_code contains final_answer() call and tool_output matches
+            # Method 4: Check if tool_code contains final_answer() call and output matches
             if parsed:
                 tool_code = parsed.get("tool_code", "")
                 if "final_answer(" in tool_code and action_output is not None:

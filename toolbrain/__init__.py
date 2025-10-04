@@ -48,7 +48,7 @@ from .rewards import (
 
 # Legacy/Advanced imports for backward compatibility
 from .core_types import Trace, TraceStep
-from .adapters import BaseAgentAdapter, SmolAgentAdapter
+from .adapters import BaseAgentAdapter, SmolAgentAdapter, LangChainAdapter, create_huggingface_chat_model
 
 __version__ = "0.2.0"
 
@@ -89,4 +89,6 @@ __all__ = [
     "TraceStep",
     "BaseAgentAdapter", 
     "SmolAgentAdapter",
+    "LangChainAdapter",
+    "create_huggingface_chat_model",  # Helper function
 ]

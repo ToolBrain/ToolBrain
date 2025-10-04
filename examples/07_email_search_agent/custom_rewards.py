@@ -34,8 +34,8 @@ def _get_agent_final_answer(trace: Trace) -> str | None:
         if parsed and parsed.get("final_answer"):
             return parsed["final_answer"]
         
-        # Method 2: Check tool_output if final_answer() was called
-        action_output = turn.get("action_output")
+        # Method 2: Check both action_output (SmolAgent) and tool_output (LangChain)
+        action_output = turn.get("action_output") or turn.get("tool_output")
         if action_output is not None:
             return str(action_output)
         
@@ -46,7 +46,7 @@ def _get_agent_final_answer(trace: Trace) -> str | None:
             if len(parts) > 1:
                 return parts[-1].strip()
         
-        # Method 4: Check if tool_code contains final_answer() call and tool_output matches
+        # Method 4: Check if tool_code contains final_answer() call and output matches
         if parsed:
             tool_code = parsed.get("tool_code", "")
             if "final_answer(" in tool_code and action_output is not None:
