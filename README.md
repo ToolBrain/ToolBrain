@@ -28,6 +28,11 @@ conda create --name toolbrain python=3.12
 conda activate toolbrain
 ```
 
+from PyPi:
+
+```bash
+pip install toolbrain
+```
 Or from the source code:
 ```bash
 git clone git@github.com:ToolBrain/ToolBrain.git
