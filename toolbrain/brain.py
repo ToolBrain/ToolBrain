@@ -20,8 +20,7 @@ from smolagents import CodeAgent, ChatMessage, MessageRole
 from .learning.supervised.algo import SupervisedAlgorithm
 from .rewards import RewardFunctionWrapper, create_reward_function, reward_exact_match
 from .core_types import Trace, RewardFunction, BatchRewardFunction
-from .adapters import BaseAgentAdapter, SmolAgentAdapter
-from .langchain_adapter_v2 import LangChainAdapter 
+from .adapters import BaseAgentAdapter, SmolAgentAdapter, LangChainAdapter 
 from .learning.dpo import DPOAlgorithm, make_dpo_pairs
 from .learning.grpo import GRPOAlgorithm
 from .learning import Policy
@@ -38,7 +37,7 @@ from .factory import create_agent
 try:
     from langgraph.graph.state import CompiledStateGraph
 except ImportError:
-    CompiledStateGraph = None # Để code không bị lỗi nếu chưa cài LangChain
+    CompiledStateGraph = None
 
 
 GRPOALiasNames = ["GRPO", "grpo"]
@@ -273,19 +272,10 @@ class Brain:
         config_dict = self.config.to_dict() if hasattr(self.config, 'to_dict') else vars(self.config)
 
         if CompiledStateGraph and isinstance(agent_instance, CompiledStateGraph):
-            model_to_use = trainable_model
-            if model_to_use is None:
-                 raise ValueError("For LangChain agents, you must provide the 'trainable_model' argument to the Brain constructor.")
-            
-            # Try to extract tools to pass explicitly
-            tools = []
-            if hasattr(self, '_langchain_tools'):
-                tools = self._langchain_tools
-            
-            return LangChainAdapter(agent=agent_instance, trainable_model=model_to_use, config=config_dict, tools=tools)
+            return LangChainAdapter(agent_instance, trainable_model, config_dict)
         
         elif isinstance(agent_instance, CodeAgent):
-            return SmolAgentAdapter(agent=agent_instance, config=config_dict)
+            return SmolAgentAdapter(agent_instance, config_dict)
         
         else:
             raise TypeError(f"Agent type '{type(agent_instance).__name__}' is not supported yet.")

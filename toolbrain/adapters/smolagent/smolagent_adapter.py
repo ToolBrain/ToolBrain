@@ -1,8 +1,7 @@
 """
-Agent adapters for ToolBrain.
+SmolAgent adapter for ToolBrain.
 
-This module provides the Adapter pattern implementation to make different
-agent libraries compatible with ToolBrain's trace-based training system.
+This module provides the adapter implementation for smolagents CodeAgent.
 """
 
 try: 
@@ -14,36 +13,17 @@ except (ImportError, NotImplementedError):
     FastLanguageModel = None
     UNSLOTH_AVAILABLE = False
 
-from abc import ABC, abstractmethod
 from smolagents.models import get_clean_message_list, tool_role_conversions
-from typing import Optional, List, Any
-
+from typing import List, Any, Tuple
 from peft import get_peft_model
-from peft import prepare_model_for_kbit_training
-
-from smolagents import CodeAgent, TransformersModel, ChatMessage, MessageRole
-import io
-import contextlib
-import re
+from smolagents import CodeAgent, TransformersModel
 import torch
-
-from .core_types import Trace, Turn, ParsedCompletion, ChatSegment
-from .models import UnslothModel
+import re
 import logging
 
-
-class BaseAgentAdapter(ABC):
-    """Abstract base class for agent adapters."""
-
-    @abstractmethod
-    def run(self, query: str) -> Trace:
-        """Execute a query and return a structured execution trace."""
-        pass
-
-    @abstractmethod
-    def get_trainable_model(self) -> TransformersModel:
-        """Return the underlying trainable model from the agent."""
-        pass
+from ..base_adapter import BaseAgentAdapter
+from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
+from ...models import UnslothModel
 
 
 class SmolAgentAdapter(BaseAgentAdapter):
@@ -85,7 +65,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
         """
         return list(self.agent.tools.values())
 
-    def run(self, query: str):
+    def run(self, query: str) -> Tuple[Trace, Any, Any]:
         """
         Executes the agent and then extracts a structured, high-fidelity trace
         from the agent's memory.
@@ -373,4 +353,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
             )
             percentage = (
                 100 * trainable_params / total_params if total_params > 0 else 0
+            )
+            logging.info(
+                f"📊 LoRA applied: {trainable_params:,} / {total_params:,} params trainable ({percentage:.2f}%)"
             )
