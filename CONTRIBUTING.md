@@ -230,8 +230,10 @@ def _build_trace_from_execution(self, result, query):
             # Add tool output to current turn
             if trace:
                 trace[-1]["tool_output"] = step.result
-            
-        trace.append(turn)
+        
+        # Only append turn for LLM responses
+        if step.type == "llm_response":
+            trace.append(turn)
     return trace
 ```
 
@@ -267,6 +269,7 @@ def _build_rl_input_from_trace(self, trace: Trace, query: str) -> List[ChatSegme
 ```python
 def _parse_completion(self, model_output: str) -> ParsedCompletion:
     """Parse model output into structured format."""
+    import re  # Add this import
     
     # Pattern 1: JSON tool call detection
     tool_call = self._extract_json_tool_call(model_output)
@@ -329,28 +332,27 @@ def _set_lora_finetuning(self):
 ### Integration with Brain System
 
 #### Update Factory Method
-Add your adapter to `toolbrain/factory.py`:
+Add your adapter to `toolbrain/brain.py` in the `_get_adapter_for_agent` method:
 
 ```python
-def _get_adapter_for_agent(agent, trainable_model, config):
-    """Factory method to create appropriate adapter."""
+def _get_adapter_for_agent(self, agent_instance: Any, trainable_model: Optional[Any]) -> BaseAgentAdapter:
+    """Factory method to automatically select the appropriate adapter."""
+    config_dict = self.config.to_dict() if hasattr(self.config, 'to_dict') else vars(self.config)
     
     # Existing adapters
-    if isinstance(agent, CodeAgent):
-        from .adapters.smolagent import SmolAgentAdapter
-        return SmolAgentAdapter(agent, trainable_model, config)
+    if CompiledStateGraph and isinstance(agent_instance, CompiledStateGraph):
+        return LangChainAdapter(agent_instance, trainable_model, config_dict)
     
-    elif hasattr(agent, 'get_graph') and hasattr(agent, 'invoke'):
-        from .adapters.langchain import LangChainAdapter  
-        return LangChainAdapter(agent, trainable_model, config)
+    elif isinstance(agent_instance, CodeAgent):
+        return SmolAgentAdapter(agent_instance, config_dict)
     
     # Add your framework
-    elif isinstance(agent, YourFrameworkAgent):  # Replace with actual class
+    elif isinstance(agent_instance, YourFrameworkAgent):  # Replace with actual class
         from .adapters.yourframework import YourFrameworkAdapter
-        return YourFrameworkAdapter(agent, trainable_model, config)
+        return YourFrameworkAdapter(agent_instance, trainable_model, config_dict)
     
     else:
-        raise ValueError(f"Unsupported agent type: {type(agent)}")
+        raise TypeError(f"Agent type '{type(agent_instance).__name__}' is not supported yet.")
 ```
 
 #### Export in __init__.py
@@ -379,7 +381,7 @@ agent = YourAgent(model="test-model", tools=[simple_tool])
 brain = Brain(agent=agent, algorithm="GRPO")
 
 # Should work without errors
-trace, _, _ = brain.adapter.get_trace("Use the tool to calculate 2+2")
+trace, _, _ = brain.agent_adapter.run("Use the tool to calculate 2+2")
 assert len(trace) > 0
 assert trace[0]["tool_output"] == "4"
 ```
@@ -431,11 +433,45 @@ tests/
 ```
 
 ### Pull Request Checklist
-- [ ] Adapter implements `BaseAgentAdapter` interface
-- [ ] Working example in `examples/` folder
-- [ ] Basic tests pass
-- [ ] Documentation in adapter docstrings
+
+#### Core Implementation
+- [ ] Adapter implements `BaseAgentAdapter` interface completely
+- [ ] All required methods implemented: `__init__`, `get_trainable_model`, `run`
+- [ ] Tool extraction working: `_extract_tools_from_agent` returns valid tools
+- [ ] Trace building working: `run()` returns proper `(Trace, rl_input, raw_memory)` format
+- [ ] RL input building: `_build_rl_input_from_trace` returns `List[ChatSegment]`
+- [ ] LoRA support: `_set_lora_finetuning` handles config properly
+
+#### Integration
+- [ ] Factory method updated: Added detection logic to `_get_adapter_for_agent`
+- [ ] Adapter exported: Added to `toolbrain/adapters/__init__.py`
+- [ ] Framework detection working: Brain auto-detects your adapter type
+
+#### Testing & Examples
+- [ ] Working example in `examples/` folder (e.g., `train_yourframework_agent.py`)
+- [ ] Basic functionality test: Adapter generates valid traces
+- [ ] Training integration test: Full RL training pipeline completes
+- [ ] Tool calling test: Tools are extracted and executed correctly
+- [ ] Error handling test: Graceful handling of execution failures
+
+#### Code Quality
+- [ ] Documentation in adapter docstrings (class and key methods)
 - [ ] No breaking changes to existing code
+- [ ] Follows existing adapter patterns (SmolAgent/LangChain style)
+- [ ] Clean imports and dependencies specified
+- [ ] Error handling with proper logging
+
+#### Framework-Specific
+- [ ] Installation requirements documented for the framework
+- [ ] Framework limitations noted in docstrings
+- [ ] Model compatibility verified (HuggingFace models work)
+- [ ] Multi-turn vs single-turn execution patterns handled
+
+#### Final Validation
+- [ ] Example script runs without errors: `python examples/train_yourframework_agent.py`
+- [ ] Training produces non-zero rewards on simple tool calling task
+- [ ] Adapter handles both tool calling and direct response scenarios
+- [ ] Memory usage reasonable (no major leaks during training)
 
 ### Documentation Requirements
 - Docstring explaining framework integration approach
