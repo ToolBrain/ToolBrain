@@ -14,6 +14,7 @@ An Adapter has one core responsibility: observe a third-party agent's execution 
 
 ### 1. Choose Your Framework
 Currently supported: **SmolAgents**, **LangChain**
+
 Requested: AutoGen, CrewAI, Agno, LlamaIndex, Haystack and others...
 
 ### 2. Create the Adapter Structure
