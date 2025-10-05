@@ -144,6 +144,18 @@ Check out our [`CONTRIBUTING.md`](./CONTRIBUTING.md) guide and the existing impl
 ## Contributors
 [Quy Minh Le](https://www.linkedin.com/in/quy-minh-le-b70218333/), Minh Sao Khue Luu, [Khanh-Tung Tran](https://www.linkedin.com/in/khanh-tung-tran-83b3541ab), Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, [Hoang Thanh Lam](https://research.ibm.com/people/thanh-hoang) and [Harry Nguyen](https://www.ucc.ie/en/compsci/people/harrynguyen/)
 
+---
+
+### 🚀 Spread the Word
+
+If you believe in ToolBrain's vision of making agent training accessible to everyone, please consider sharing it with your network!
+
+[![Share on Twitter](https://img.shields.io/badge/-Share%20on%20Twitter-%231DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/intent/tweet?text=Just%20found%20ToolBrain%2C%20a%20lightweight%20open-source%20framework%20to%20train%20AI%20agents%20%28like%20LangChain%20or%20SmolAgent%29%20to%20use%20tools%20reliably%20with%20Reinforcement%20Learning.%20A%20gym%20for%20your%20agents%21&url=https%3A%2F%2Fgithub.com%2FToolBrain%2FToolBrain&hashtags=ToolBrain,AIAgents,ReinforcementLearning,LLM,OpenSource)
+[![Share on LinkedIn](https://img.shields.io/badge/-Share%20on%20LinkedIn-%230A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fgithub.com%2FToolBrain%2FToolBrain&title=ToolBrain%3A%20A%20Lightweight%20RL%20Framework%20for%20Training%20AI%20Agents&summary=Just%20found%20ToolBrain%2C%20a%20lightweight%20open-source%20framework%20to%20train%20AI%20agents%20%28like%20LangChain%20or%20SmolAgent%29%20to%20use%20tools%20reliably%20with%20Reinforcement%20Learning.%20A%20gym%20for%20your%20agents%21)
+[![Share on Facebook](https://img.shields.io/badge/-Share%20on%20Facebook-%231877F2?style=for-the-badge&logo=facebook&logoColor=white)](https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fgithub.com%2FToolBrain%2FToolBrain)
+[![Share on Reddit](https://img.shields.io/badge/-Share%20on%20Reddit-%23FF4500?style=for-the-badge&logo=reddit&logoColor=white)](https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2FToolBrain%2FToolBrain&title=ToolBrain%3A%20A%20Lightweight%20RL%20Framework%20for%20Training%20AI%20Agents)
+
+---
 
 ## References
 Please cite [our paper](https://arxiv.org/abs/2510.00023) with the following bibtex:
