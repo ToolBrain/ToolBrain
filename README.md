@@ -20,6 +20,17 @@ Support us by giving ToolBrain a ⭐ on GitHub.
 - **⚡ Efficient training**: Supports LoRA, Unsloth, and BitsAndBytes for [resource-efficient training](examples/07_email_search_agent/).
 - 🧠 **Multiple agent frameworks**: Supports SmolAgent and [LangChain](examples/11_train_langchain_agent.py), with more coming soon.
 
+## 🌍 Building a Universal Agent Training Ecosystem
+
+Our vision is for **ToolBrain** to become the universal Reinforcement Learning layer for any agentic framework. Whether you build your agents with **LangChain**, **LlamaIndex**, **AutoGen**, or a custom solution, you should be able to make them smarter with ToolBrain.
+
+The key to this vision is our **modular Adapter architecture**. Adding support for a new framework is as simple as implementing a new adapter that translates the agent's internal state into ToolBrain's standard *Execution Trace*.
+
+We welcome community contributions!  
+If you are using an agent framework not yet supported, we encourage you to build an adapter for it.  
+Check out our [`CONTRIBUTING.md`](./CONTRIBUTING.md) guide and the existing implementations in the [`toolbrain/adapters/`](./toolbrain/adapters/) directory to get started.
+
+
 ## 🚀 Getting Started
 
 ### Prerequisites
