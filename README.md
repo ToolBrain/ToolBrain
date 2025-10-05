@@ -1,6 +1,6 @@
 # ToolBrain 🧠
 ![PyPI Version](https://img.shields.io/pypi/v/toolbrain)
-![PyPI Downloads (month)](https://img.shields.io/pypi/dm/toolbrain)
+
 
 ToolBrain is a lightweight open-source Python library for training **agentic systems** with effective tool usage and built-in reinforcement learning.  
 📚 Documentation & tutorials: [toolbrain.org](https://toolbrain.org)
