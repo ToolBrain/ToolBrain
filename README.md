@@ -20,17 +20,6 @@ Support us by giving ToolBrain a ⭐ on GitHub.
 - **⚡ Efficient training**: Supports LoRA, Unsloth, and BitsAndBytes for [resource-efficient training](examples/07_email_search_agent/).
 - 🧠 **Multiple agent frameworks**: Supports SmolAgent and [LangChain](examples/11_train_langchain_agent.py), with more coming soon.
 
-## 🌍 Building a Universal Agent Training Ecosystem
-
-Our vision is for **ToolBrain** to become the universal Reinforcement Learning layer for any agentic framework. Whether you build your agents with **LangChain**, **LlamaIndex**, **AutoGen**, or a custom solution, you should be able to make them smarter with ToolBrain.
-
-The key to this vision is our **modular Adapter architecture**. Adding support for a new framework is as simple as implementing a new adapter that translates the agent's internal state into ToolBrain's standard *Execution Trace*.
-
-We welcome community contributions!  
-If you are using an agent framework not yet supported, we encourage you to build an adapter for it.  
-Check out our [`CONTRIBUTING.md`](./CONTRIBUTING.md) guide and the existing implementations in the [`toolbrain/adapters/`](./toolbrain/adapters/) directory to get started.
-
-
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -142,6 +131,15 @@ The following plot illustrates how ToolBrain enhances the tool usage accuracy of
 
 This project is licensed under the MIT License - see the [LICENSE](https://opensource.org/licenses/MIT) for details.
 
+## 🌍 Community contributions
+
+Our vision is for **ToolBrain** to become the universal Reinforcement Learning layer for any agentic framework. Whether you build your agents with **LangChain**, **LlamaIndex**, **AutoGen**, or a custom solution, you should be able to make them smarter with ToolBrain.
+
+The key to this vision is our **modular Adapter architecture**. Adding support for a new framework is as simple as implementing a new adapter that translates the agent's internal state into ToolBrain's standard *Execution Trace*.
+
+We welcome community contributions!  
+If you are using an agent framework not yet supported, we encourage you to build an adapter for it.  
+Check out our [`CONTRIBUTING.md`](./CONTRIBUTING.md) guide and the existing implementations in the [`toolbrain/adapters/`](./toolbrain/adapters/) directory to get started.
 
 ## Contributors
 [Quy Minh Le](https://www.linkedin.com/in/quy-minh-le-b70218333/), Minh Sao Khue Luu, [Khanh-Tung Tran](https://www.linkedin.com/in/khanh-tung-tran-83b3541ab), Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, [Hoang Thanh Lam](https://research.ibm.com/people/thanh-hoang) and [Harry Nguyen](https://www.ucc.ie/en/compsci/people/harrynguyen/)
