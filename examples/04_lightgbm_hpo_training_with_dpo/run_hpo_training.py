@@ -5,11 +5,9 @@ with the right feature_faction value ranging from 0 to 1.
 This example is similar to the HPO example with GRPO, the only difference is the change from GRPO to DPO
 
 """
-import os
-import sys
+
 from typing import Any
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from smolagents import CodeAgent, TransformersModel, tool
 from toolbrain import Brain, Trace
 from lightgbm_model import run_lightgbm

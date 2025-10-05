@@ -3,11 +3,9 @@ ToolBrain Training Example - Use RL of ToolBrain for HPO.
 The agent needs to call the  run_lightgbm(feature_fraction: float) function defined in the file lightgbm_model.py
 with the right feature_faction value ranging from 0 to 1.
 """
-import os
-import sys
+
 from typing import Any
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from smolagents import CodeAgent, TransformersModel, tool
 from toolbrain import Brain, Trace
 from lightgbm_model import run_lightgbm

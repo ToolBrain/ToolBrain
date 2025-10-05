@@ -6,19 +6,14 @@ This script demonstrates the new, simplified ToolBrain API.
 2. Pass the config to the Brain.
 3. Call brain.train().
 """
-import os
-import sys
+
 from typing import List
 
 from dotenv import load_dotenv
 
-from peft import LoraConfig
-
 from toolbrain.core_types import ChatSegment
 
 load_dotenv()
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from smolagents import CodeAgent, TransformersModel
 from toolbrain import Brain

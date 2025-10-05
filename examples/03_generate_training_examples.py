@@ -10,12 +10,8 @@
 # Finally, we use the generated examples to train the agent.
 # Note: You can also manually curate or modify the generated examples before training.
 
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
 from smolagents import tool
 from toolbrain import Brain, create_agent
-
 
 @tool
 def calculate_compound_interest(principal: float,

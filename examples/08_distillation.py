@@ -12,10 +12,6 @@ The distillation process:
 - Student is then ready for efficient RL training
 """
 
-import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ""))
 
 from smolagents import tool, TransformersModel, CodeAgent
 from toolbrain import create_agent, Brain, reward_tool_execution_success

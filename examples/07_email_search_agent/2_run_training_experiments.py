@@ -26,10 +26,6 @@ import os
 import logging
 from datasets import load_dataset
 
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-sys.path.insert(0, os.path.dirname(__file__))
 import config
 import custom_rewards
 import email_tools

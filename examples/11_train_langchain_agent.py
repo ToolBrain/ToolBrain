@@ -5,10 +5,6 @@ This example demonstrates how to train a LangChain agent using ToolBrain.
 It uses HuggingFace models with custom tool calling for local training and fine-tuning.
 """
 
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from toolbrain import Brain, create_huggingface_chat_model
 from toolbrain.rewards import reward_exact_match
 
