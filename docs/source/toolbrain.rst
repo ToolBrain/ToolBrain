@@ -7,18 +7,11 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   toolbrain.adapters
    toolbrain.learning
 
 Submodules
 ----------
-
-toolbrain.adapters module
--------------------------
-
-.. automodule:: toolbrain.adapters
-   :members:
-   :show-inheritance:
-   :undoc-members:
 
 toolbrain.brain module
 ----------------------
@@ -40,6 +33,38 @@ toolbrain.core\_types module
 ----------------------------
 
 .. automodule:: toolbrain.core_types
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+toolbrain.factory module
+------------------------
+
+.. automodule:: toolbrain.factory
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+toolbrain.models module
+-----------------------
+
+.. automodule:: toolbrain.models
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+toolbrain.prompt module
+-----------------------
+
+.. automodule:: toolbrain.prompt
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+toolbrain.retriever module
+--------------------------
+
+.. automodule:: toolbrain.retriever
    :members:
    :show-inheritance:
    :undoc-members:

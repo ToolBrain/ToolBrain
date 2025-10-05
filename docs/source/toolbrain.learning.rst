@@ -9,6 +9,7 @@ Subpackages
 
    toolbrain.learning.dpo
    toolbrain.learning.grpo
+   toolbrain.learning.supervised
 
 Submodules
 ----------

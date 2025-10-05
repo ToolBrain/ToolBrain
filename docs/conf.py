@@ -25,7 +25,14 @@ extensions = [
         'sphinx.ext.autodoc',
          'sphinx.ext.autosummary',
         'sphinx.ext.napoleon', 
+        'myst_parser',
+        'nbsphinx',
     ]
+
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
+}
 
 autosummary_generate = True
 

@@ -6,9 +6,10 @@
 ToolBrain documentation
 =======================
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+ToolBrain is a lightweight open-source Python library for training agentic systems with effective tool usage and built-in reinforcement learning.
+
+
+Start with the :doc:`Tutorials <./source/tutorials/tutorials>`.
 
 
 .. toctree::
