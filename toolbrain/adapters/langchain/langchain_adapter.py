@@ -248,10 +248,6 @@ class LangChainAdapter(BaseAgentAdapter):
         Executes the agent and reconstructs a high-fidelity trace.
         """
         print(f"🔍 Running query with custom tool calling: {query[:50]}...")
-        return self._run_with_custom_tool_calling(query)
-
-    def _run_with_custom_tool_calling(self, query: str) -> Tuple[Trace, Any, List[Any]]:
-        """Run with custom tool calling implementation for HuggingFace models."""
         trace: Trace = []
         
         try:
@@ -338,7 +334,7 @@ class LangChainAdapter(BaseAgentAdapter):
             return trace, rl_input, raw_memory_steps
 
         except Exception as e:
-            logging.error(f"An exception occurred during custom tool calling: {e}", exc_info=True)
+            logging.error(f"An exception occurred during agent execution: {e}", exc_info=True)
             return [], None, []
 
     def _extract_tool_call_from_content(self, content: str) -> Dict[str, Any]:

@@ -26,15 +26,27 @@ touch toolbrain/adapters/yourframework/yourframework_adapter.py
 ### 3. Implement the Base Interface
 ```python
 from ..base_adapter import BaseAgentAdapter
-from ...core_types import Trace, Turn, ParsedCompletion
+from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
+from typing import List, Any, Tuple
 
 class YourFrameworkAdapter(BaseAgentAdapter):
-    def __init__(self, agent, trainable_model, config=None):
-        super().__init__(agent, trainable_model, config)
+    def __init__(self, agent, trainable_model, config):
+        """Initialize adapter with agent, model, and config."""
+        self.agent = agent
+        self._trainable_model = trainable_model
+        self.config = config
+        
         # Extract tools from your framework's agent
         self.tools = self._extract_tools_from_agent(agent)
+        
+        # Set up LoRA fine-tuning if configured
+        self._set_lora_finetuning()
     
-    def get_trace(self, query: str, **kwargs) -> Tuple[Trace, Any, Any]:
+    def get_trainable_model(self) -> Any:
+        """Returns the agent's underlying trainable model."""
+        return self._trainable_model
+    
+    def run(self, query: str) -> Tuple[Trace, Any, Any]:
         """Run agent and convert execution to ToolBrain trace format."""
         # 1. Execute your framework's agent
         # 2. Capture execution steps  
@@ -74,30 +86,285 @@ Turn = {
 
 ## Adapter Implementation Guide
 
-### Extract Tools
+### Required Methods Overview
+
+Every adapter must implement these core methods:
+
 ```python
-def _extract_tools_from_agent(self, agent):
-    # Each framework stores tools differently:
-    # - SmolAgent: agent.tools
-    # - LangChain: graph.nodes['tools'].data.tools_by_name
-    # - YourFramework: ???
+class YourFrameworkAdapter(BaseAgentAdapter):
+    def __init__(self, agent, trainable_model, config):
+        """Initialize adapter"""
+        pass
+    
+    def get_trainable_model(self) -> Any:
+        """Return the underlying trainable model"""
+        pass
+    
+    def run(self, query: str) -> Tuple[Trace, Any, Any]:
+        """Execute agent and return (trace, rl_input, raw_memory)"""
+        pass
+    
+    def _extract_tools_from_agent(self, agent) -> List[Any]:
+        """Extract tools from framework's agent"""
+        pass
+    
+    def _build_rl_input_from_trace(self, trace: Trace, query: str) -> List[ChatSegment]:
+        """Convert trace to RL training format"""
+        pass
+    
+    def _set_lora_finetuning(self):
+        """Apply LoRA if configured"""
+        pass
 ```
 
-### Capture Execution
+### Method Implementation Details
+
+#### 1. Tool Extraction Pattern
 ```python
-def get_trace(self, query: str, **kwargs):
-    # Hook into your framework's execution:
-    # - Override execution methods
-    # - Use callbacks/listeners
-    # - Parse execution logs
-    # - Intercept tool calls
+def _extract_tools_from_agent(self, agent) -> List[Any]:
+    """Extract tools from your framework's agent."""
+    tools = []
+    
+    # Pattern 1: Direct attribute access
+    if hasattr(agent, 'tools'):
+        tools = agent.tools  # SmolAgent pattern
+    
+    # Pattern 2: Method call
+    elif hasattr(agent, 'get_tools'):
+        tools = agent.get_tools()
+    
+    # Pattern 3: Graph traversal (LangChain pattern)
+    elif hasattr(agent, 'get_graph'):
+        graph = agent.get_graph()
+        for node_id, node_data in graph.nodes.items():
+            if node_id == 'tools':
+                tool_node = node_data.data
+                if hasattr(tool_node, 'tools_by_name'):
+                    tools = list(tool_node.tools_by_name.values())
+    
+    # Pattern 4: Registry lookup
+    elif hasattr(agent, 'tool_registry'):
+        tools = list(agent.tool_registry.values())
+    
+    return tools
 ```
 
-### Handle Different Execution Patterns
-- **Single-turn**: One prompt → one response
-- **Multi-turn**: Agent → tools → agent → tools...
-- **Streaming**: Real-time execution updates
-- **Error handling**: Failed tool calls, parsing errors
+#### 2. Agent Execution & Trace Building
+```python
+def run(self, query: str) -> Tuple[Trace, Any, Any]:
+    """Execute agent and build trace."""
+    try:
+        # Execute your framework's agent
+        result = self._execute_agent(query)
+        
+        # Convert to structured trace
+        trace = self._build_trace_from_execution(result, query)
+        
+        # Build RL input
+        rl_input = self._build_rl_input_from_trace(trace, query)
+        
+        # Capture raw memory for advanced analysis
+        raw_memory = self._extract_raw_memory(result)
+        
+        return trace, rl_input, raw_memory
+        
+    except Exception as e:
+        # Return error trace
+        error_turn = Turn(
+            prompt_for_model=query,
+            model_completion=f"Error: {str(e)}",
+            parsed_completion=ParsedCompletion(
+                thought=None,
+                tool_code=None,
+                final_answer=f"Error: {str(e)}"
+            ),
+            tool_output=None,
+            action_output=None,
+            formatted_conversation=None
+        )
+        return [error_turn], None, []
+```
+
+#### 3. Trace Building Patterns
+
+**Single-turn pattern (simple Q&A):**
+```python
+def _build_trace_from_execution(self, result, query):
+    trace = []
+    
+    turn = Turn(
+        prompt_for_model=query,
+        model_completion=result.content,
+        parsed_completion=ParsedCompletion(
+            thought=result.content,
+            tool_code=None,
+            final_answer=result.content
+        ),
+        tool_output=None,
+        action_output=None,
+        formatted_conversation=None
+    )
+    trace.append(turn)
+    return trace
+```
+
+**Multi-turn pattern (with tools):**
+```python
+def _build_trace_from_execution(self, result, query):
+    trace = []
+    
+    for step in result.steps:
+        if step.type == "llm_response":
+            # LLM reasoning/tool call
+            turn = Turn(
+                prompt_for_model=step.input,
+                model_completion=step.output,
+                parsed_completion=self._parse_completion(step.output),
+                tool_output=None,
+                action_output=None,
+                formatted_conversation=None
+            )
+            
+        elif step.type == "tool_execution":
+            # Add tool output to current turn
+            if trace:
+                trace[-1]["tool_output"] = step.result
+            
+        trace.append(turn)
+    return trace
+```
+
+#### 4. RL Input Building (Universal Pattern)
+```python
+def _build_rl_input_from_trace(self, trace: Trace, query: str) -> List[ChatSegment]:
+    """Convert trace to RL training format."""
+    segments = []
+    
+    # Add initial query
+    segments.append(ChatSegment(role="other", text=f"user: {query}\n"))
+    
+    # Add each turn
+    for turn in trace:
+        # Add LLM response
+        if turn.get("model_completion"):
+            segments.append(ChatSegment(
+                role="assistant", 
+                text=turn["model_completion"]
+            ))
+        
+        # Add tool output if present
+        if turn.get("tool_output"):
+            segments.append(ChatSegment(
+                role="other", 
+                text=f"\ntool_output: {turn['tool_output']}\n"
+            ))
+    
+    return segments
+```
+
+#### 5. ParsedCompletion Extraction
+```python
+def _parse_completion(self, model_output: str) -> ParsedCompletion:
+    """Parse model output into structured format."""
+    
+    # Pattern 1: JSON tool call detection
+    tool_call = self._extract_json_tool_call(model_output)
+    if tool_call:
+        return ParsedCompletion(
+            thought=model_output,
+            tool_code=f"{tool_call['name']}({tool_call['arguments']})",
+            final_answer=None
+        )
+    
+    # Pattern 2: Code block detection  
+    code_match = re.search(r'```python\n(.*?)\n```', model_output, re.DOTALL)
+    if code_match:
+        return ParsedCompletion(
+            thought=model_output,
+            tool_code=code_match.group(1),
+            final_answer=None
+        )
+    
+    # Pattern 3: Direct response
+    return ParsedCompletion(
+        thought=model_output,
+        tool_code=None,
+        final_answer=model_output
+    )
+```
+
+#### 6. LoRA Setup (Standard Pattern)
+```python
+def _set_lora_finetuning(self):
+    """Apply LoRA configuration if specified."""
+    lora_config = self.config.get("lora_config", None)
+    if not lora_config:
+        return
+    
+    # Convert dict to LoraConfig if needed
+    if isinstance(lora_config, dict):
+        from peft import LoraConfig
+        lora_config = LoraConfig(**lora_config)
+    
+    # Get the actual model
+    trainable_model = self.get_trainable_model()
+    actual_model = getattr(trainable_model, 'model', trainable_model)
+    
+    # Apply LoRA
+    from peft import get_peft_model
+    peft_model = get_peft_model(actual_model, lora_config)
+    
+    # Update model reference
+    if hasattr(trainable_model, 'model'):
+        trainable_model.model = peft_model
+    
+    # Log statistics
+    total_params = sum(p.numel() for p in peft_model.parameters())
+    trainable_params = sum(p.numel() for p in peft_model.parameters() if p.requires_grad)
+    percentage = 100 * trainable_params / total_params if total_params > 0 else 0
+    print(f"📊 LoRA applied: {trainable_params:,} / {total_params:,} params trainable ({percentage:.2f}%)")
+```
+
+### Integration with Brain System
+
+#### Update Factory Method
+Add your adapter to `toolbrain/factory.py`:
+
+```python
+def _get_adapter_for_agent(agent, trainable_model, config):
+    """Factory method to create appropriate adapter."""
+    
+    # Existing adapters
+    if isinstance(agent, CodeAgent):
+        from .adapters.smolagent import SmolAgentAdapter
+        return SmolAgentAdapter(agent, trainable_model, config)
+    
+    elif hasattr(agent, 'get_graph') and hasattr(agent, 'invoke'):
+        from .adapters.langchain import LangChainAdapter  
+        return LangChainAdapter(agent, trainable_model, config)
+    
+    # Add your framework
+    elif isinstance(agent, YourFrameworkAgent):  # Replace with actual class
+        from .adapters.yourframework import YourFrameworkAdapter
+        return YourFrameworkAdapter(agent, trainable_model, config)
+    
+    else:
+        raise ValueError(f"Unsupported agent type: {type(agent)}")
+```
+
+#### Export in __init__.py
+Add to `toolbrain/adapters/__init__.py`:
+
+```python
+from .yourframework import YourFrameworkAdapter
+
+__all__ = [
+    "SmolAgentAdapter",
+    "LangChainAdapter", 
+    "YourFrameworkAdapter",  # Add this
+    "create_huggingface_chat_model"
+]
+```
 
 ## Testing Your Adapter
 
