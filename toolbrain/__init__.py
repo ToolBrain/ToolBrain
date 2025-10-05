@@ -47,10 +47,10 @@ from .rewards import (
 )
 
 # Legacy/Advanced imports for backward compatibility
-from .core_types import Trace, TraceStep
+from .core_types import Trace
 from .adapters import BaseAgentAdapter, SmolAgentAdapter, LangChainAdapter, create_huggingface_chat_model
 
-__version__ = "0.2.0"
+__version__ = "0.1.0"
 
 # Public API - what most users should import
 __all__ = [
@@ -86,7 +86,6 @@ __all__ = [
     
     # === ADVANCED/LEGACY ===
     "Trace",
-    "TraceStep",
     "BaseAgentAdapter", 
     "SmolAgentAdapter",
     "LangChainAdapter",

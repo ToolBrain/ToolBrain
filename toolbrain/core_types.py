@@ -8,14 +8,7 @@ The new structure ensures 100% data fidelity for RL training by preserving
 the exact context the LLM saw and what it generated.
 """
 
-from typing import List, Literal, TypedDict, Protocol, Any, Optional
-
-
-class TraceStep(TypedDict):
-    """Legacy trace step structure - kept for backward compatibility."""
-    type: Literal["thought", "tool_code", "tool_output", "final_answer"]
-    content: str
-
+from typing import List, TypedDict, Protocol, Any, Optional
 
 class ParsedCompletion(TypedDict):
     """
@@ -43,12 +36,12 @@ class Turn(TypedDict):
     formatted_conversation: Optional[str]  # Formatted text using smolagents utilities
 
 
-# New trace structure: List of Turns for data consistency
+# Trace structure: List of Turns for data consistency
 Trace = List[Turn]
 
-# Legacy trace structure: List of TraceSteps (deprecated but kept for compatibility)
-LegacyTrace = List[TraceStep]
-
+class ChatSegment(TypedDict):
+    role: str
+    text: str
 
 class RewardFunction(Protocol):
     """
@@ -83,6 +76,4 @@ class BatchRewardFunction(Protocol):
     def __call__(self, traces: List[Trace], **kwargs: Any) -> List[float]: ...
 
 
-class ChatSegment(TypedDict):
-    role: str
-    text: str
+
