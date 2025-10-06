@@ -17,7 +17,7 @@ Support us by giving ToolBrain a ⭐ on GitHub.
 - **🔧 Tool management**: Scalable [retrieval](examples/06_tool_retrieval.py) for managing large tool collections.  
 - **📊 Knowledge distillation**: [Distill](examples/08_distillation.py) large teacher models into smaller student models for efficiency.  
 - **🚀 Zero-learn**: Automatically [generate training tasks](examples/03_generate_training_examples.py ).  
-- **⚡ Efficient training**: Supports LoRA, Unsloth, and BitsAndBytes for [resource-efficient training](examples/07_email_search_agent/).
+- **⚡ Efficient training**: Supports LoRA, Unsloth, and [BitsAndBytes](examples/12_hello_world_bitsandbytes.py) for [resource-efficient training](examples/07_email_search_agent/).
 - 🧠 **Multiple agent frameworks**: Supports SmolAgent and [LangChain](examples/11_train_langchain_agent.py), with more coming soon.
 
 ## 🚀 Getting Started

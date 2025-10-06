@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "toolbrain"
-version = "0.1.0"
+version = "0.1.2"
 description = "A framework for training LLM-powered agents to use tools more effectively using Reinforcement Learning"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,7 +35,8 @@ dependencies = [
     "langchain>=1.0.0a10",
     "langchain-huggingface",
     "langgraph",
-    "langchain_core"
+    "langchain_core",
+    "bitsandbytes"
 ]
 
 [project.optional-dependencies]
