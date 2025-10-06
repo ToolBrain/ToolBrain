@@ -133,7 +133,7 @@ This project is licensed under the MIT License - see the [LICENSE](https://opens
 
 ## 🌍 Community contributions
 
-Our vision is for **ToolBrain** to become the universal Reinforcement Learning layer for any agentic framework. Whether you build your agents with **LangChain**, **LlamaIndex**, **AutoGen**, or a custom solution, you should be able to make them smarter with ToolBrain.
+Our vision is for **ToolBrain** to become the universal Reinforcement Learning layer for any agentic framework. Whether you build your agents with **LangChain**, **SmolAgents**, **LlamaIndex**, **AutoGen**, or a custom solution, you should be able to make them smarter with ToolBrain.
 
 The key to this vision is our **modular Adapter architecture**. Adding support for a new framework is as simple as implementing a new adapter that translates the agent's internal state into ToolBrain's standard *Execution Trace*.
 
