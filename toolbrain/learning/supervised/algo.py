@@ -37,7 +37,13 @@ class SupervisedAlgorithm:
         self.training_steps = 0
 
         use_bitandbytes = config.get("use_bitsandbytes", False)
+
+        # ----- FP16 or Bitsandbytes setup -----
+        self.fp16 = config.get("fp16", False)
+
         if use_bitandbytes:
+            self.fp16 = False  # if bitsandbytes is enabled, disable fp16
+
             self.optimizer = bnb.optim.AdamW8bit(
                 self.policy.llm.parameters(),
                 lr=self.config["learning_rate"],
@@ -78,24 +84,24 @@ class SupervisedAlgorithm:
         chunk_len = self.config.get("chunk_len", None)
         # Mask of completion tokens (B, L-1) shifted to ignore the first token
         completion_mask = batch.completion_mask[:, 1:].to(self.device)
+        with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+            # Per-token log-probs from current policy
+            pi_logps_per_token = pi_theta.get_per_token_logps(
+                input_ids=batch.input_ids.to(self.device),
+                attention_mask=batch.attention_mask.to(self.device),
+                chunk_len=chunk_len,
+            )  # (B, L-1)
 
-        # Per-token log-probs from current policy
-        pi_logps_per_token = pi_theta.get_per_token_logps(
-            input_ids=batch.input_ids.to(self.device),
-            attention_mask=batch.attention_mask.to(self.device),
-            chunk_len=chunk_len,
-        )  # (B, L-1)
+            # cross entropy is negative of log probs:
+            pi_ce_per_token = - pi_logps_per_token  # (B, L-1)
 
-        # cross entropy is negative of log probs:
-        pi_ce_per_token = - pi_logps_per_token  # (B, L-1)
-
-        # === Sequence-level mean cross-entropy over completion tokens only ===
-        def masked_mean_ce(pi_ce_per_token, mask):
-            # (pi_ce_per_token * mask).sum() / mask.sum() per sequence
-            masked_sum = (pi_ce_per_token * mask).sum(dim=1)
-            lengths = mask.sum(dim=1).clamp(min=1)
-            return masked_sum / lengths  # shape: (B,)
-        loss = masked_mean_ce(pi_ce_per_token, completion_mask).mean()
+            # === Sequence-level mean cross-entropy over completion tokens only ===
+            def masked_mean_ce(pi_ce_per_token, mask):
+                # (pi_ce_per_token * mask).sum() / mask.sum() per sequence
+                masked_sum = (pi_ce_per_token * mask).sum(dim=1)
+                lengths = mask.sum(dim=1).clamp(min=1)
+                return masked_sum / lengths  # shape: (B,)
+            loss = masked_mean_ce(pi_ce_per_token, completion_mask).mean()
         # Update step
         pi_theta = self._update_policy(pi_theta, loss)
 

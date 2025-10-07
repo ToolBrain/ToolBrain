@@ -41,8 +41,12 @@ class DPOAlgorithm:
         self.config = config
         self.training_steps = 0
 
+        # ----- FP16 or Bitsandbytes setup -----
+        self.fp16 = config.get("fp16", False)
+
         use_bitandbytes = config.get("use_bitsandbytes", False)
         if use_bitandbytes:
+            self.fp16 = False  # if bitsandbytes is enabled, disable fp16
             self.optimizer = bnb.optim.AdamW8bit(
                 self.policy.llm.parameters(),
                 lr=self.config["learning_rate"],
@@ -90,33 +94,34 @@ class DPOAlgorithm:
         # Mask of completion tokens (B, L-1)
         chosen_completion_mask = chosen_batch.completion_mask[:, 1:].to(self.device)
         rejected_completion_mask = rejected_batch.completion_mask[:, 1:].to(self.device)
-
-        # Per-token log-probs from current policy
-        pi_chosen_logps_per_token = pi_theta.get_per_token_logps(
-            input_ids=chosen_batch.input_ids.to(self.device),
-            attention_mask=chosen_batch.attention_mask.to(self.device),
-            chunk_len=chunk_len,
-        )  # (B, L-1)
-
-        pi_rejected_logps_per_token = pi_theta.get_per_token_logps(
-            input_ids=rejected_batch.input_ids.to(self.device),
-            attention_mask=rejected_batch.attention_mask.to(self.device),
-            chunk_len=chunk_len,
-        )  # (B, L-1)
-
-        # Per-token log-probs from reference policy
-        with torch.no_grad():
-            pi_ref_chosen_logps_per_token = self.pi_ref.get_per_token_logps(
+        with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+            # Per-token log-probs from current policy
+            pi_chosen_logps_per_token = pi_theta.get_per_token_logps(
                 input_ids=chosen_batch.input_ids.to(self.device),
                 attention_mask=chosen_batch.attention_mask.to(self.device),
                 chunk_len=chunk_len,
             )  # (B, L-1)
 
-            pi_ref_rejected_logps_per_token = self.pi_ref.get_per_token_logps(
+            pi_rejected_logps_per_token = pi_theta.get_per_token_logps(
                 input_ids=rejected_batch.input_ids.to(self.device),
                 attention_mask=rejected_batch.attention_mask.to(self.device),
                 chunk_len=chunk_len,
             )  # (B, L-1)
+
+        # Per-token log-probs from reference policy
+        with torch.no_grad():
+            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+                pi_ref_chosen_logps_per_token = self.pi_ref.get_per_token_logps(
+                    input_ids=chosen_batch.input_ids.to(self.device),
+                    attention_mask=chosen_batch.attention_mask.to(self.device),
+                    chunk_len=chunk_len,
+                )  # (B, L-1)
+
+                pi_ref_rejected_logps_per_token = self.pi_ref.get_per_token_logps(
+                    input_ids=rejected_batch.input_ids.to(self.device),
+                    attention_mask=rejected_batch.attention_mask.to(self.device),
+                    chunk_len=chunk_len,
+                )  # (B, L-1)
 
         # === Sequence-level mean logps over completion tokens only ===
         def masked_mean_logps(logps_per_token, mask):
@@ -125,18 +130,19 @@ class DPOAlgorithm:
             lengths = mask.sum(dim=1).clamp(min=1)
             return masked_sum / lengths  # shape: (B,)
 
-        pi_chosen_logps = masked_mean_logps(pi_chosen_logps_per_token, chosen_completion_mask)
-        pi_rejected_logps = masked_mean_logps(pi_rejected_logps_per_token, rejected_completion_mask)
-        pi_ref_chosen_logps = masked_mean_logps(pi_ref_chosen_logps_per_token, chosen_completion_mask)
-        pi_ref_rejected_logps = masked_mean_logps(pi_ref_rejected_logps_per_token, rejected_completion_mask)
+        with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+            pi_chosen_logps = masked_mean_logps(pi_chosen_logps_per_token, chosen_completion_mask)
+            pi_rejected_logps = masked_mean_logps(pi_rejected_logps_per_token, rejected_completion_mask)
+            pi_ref_chosen_logps = masked_mean_logps(pi_ref_chosen_logps_per_token, chosen_completion_mask)
+            pi_ref_rejected_logps = masked_mean_logps(pi_ref_rejected_logps_per_token, rejected_completion_mask)
 
-        # === DPO loss ===
-        beta = self.config.get("beta", 0.1)
-        logits = beta * (
-                (pi_chosen_logps - pi_rejected_logps)
-                - (pi_ref_chosen_logps - pi_ref_rejected_logps)
-        )
-        loss = -torch.nn.functional.logsigmoid(logits).mean()
+            # === DPO loss ===
+            beta = self.config.get("beta", 0.1)
+            logits = beta * (
+                    (pi_chosen_logps - pi_rejected_logps)
+                    - (pi_ref_chosen_logps - pi_ref_rejected_logps)
+            )
+            loss = -torch.nn.functional.logsigmoid(logits).mean()
 
         # Update step
         pi_theta = self._update_policy(pi_theta, loss)

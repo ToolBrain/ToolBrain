@@ -70,7 +70,7 @@ Explore practical, real-world applications of ToolBrain.
 
 Learn how to train larger models faster and with less memory.
 
--   **Techniques for Efficiency (LoRA, BitsAndBytes, Unsloth)**
+-   **Techniques for Efficiency (FP16, LoRA, BitsAndBytes, Unsloth)**
     -   A guide to using LoRA, 4-bit quantization, and Unsloth to optimize your training runs.
     -   [[Jupyter Notebook]](./part_04_efficient_learning.ipynb)
 

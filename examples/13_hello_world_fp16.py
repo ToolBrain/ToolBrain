@@ -1,21 +1,20 @@
 """
 ToolBrain Training Example
 
+This script is similar to the standard hello-world example but running training and inference with fp16 to save GPU memory.
+This example only run on machines with GPU supported.
+
 This script demonstrates the new, ultra-simplified ToolBrain API:
 1. Create a smolagent CodeAgent
 2. Create brain with Brain() constructor (all parameters as keywords)
 3. Train with explicit, self-documenting parameters
 
-This script is similar to the standard hello-world example but running inference with bitsandsbytes to save GPU memory.
-This example only run on machines with GPU supported
-
 """
 
 from smolagents import tool, TransformersModel, CodeAgent
-from transformers import BitsAndBytesConfig
-
 from toolbrain import Brain
 from toolbrain.rewards import reward_exact_match
+import torch
 
 # --- 1. Define Tools and Reward Function (User-defined) ---
 @tool
@@ -64,17 +63,12 @@ training_dataset = [
 print("🧠 ToolBrain Training Example with Reinforcement Learning")
 print("=" * 60)
 
-# 0. set bitsandbytes config for low precision inference
-nf4_config = BitsAndBytesConfig( load_in_4bit=True, bnb_4bit_quant_type="nf4")
-
-
 # 1. Create agent
 model = TransformersModel(
     model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model for better results
     max_new_tokens=128,
-    model_kwargs={"quantization_config": nf4_config},
+    torch_dtype=torch.float16  # We must set this to run with FP16 precision
 )
-
 
 agent = CodeAgent(
     model=model,
@@ -94,7 +88,7 @@ brain = Brain(
     # Customised reward function is defined here, we use a mocking reward function with value 1.0
     # for an exact gold_answer match and 0 otherwise, llm as judge can be used for automatic reward
     reward_func=reward_exact_match,
-    use_bitsandbytes=True
+    fp16= True  # Enable fp16 training in Brain
 )
 
 # 3. Train the agent with RL for 10 training GRPO steps

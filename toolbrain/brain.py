@@ -75,6 +75,7 @@ class Brain:
         # === Optimization Settings ===
         max_grad_norm: float = 1.0,    # Gradient clipping
         use_bitsandbytes: bool = False, # Memory optimization
+        fp16: bool = False, # Whether training is done using FP16
         
         # === Reward & Tools ===
         reward_func: Optional[Union[RewardFunction, BatchRewardFunction, RewardFunctionWrapper]] = None,
@@ -109,7 +110,8 @@ class Brain:
             # === Optimization ===
             max_grad_norm: Gradient clipping threshold
             use_bitsandbytes: Enable memory-efficient training
-            
+            fp16: Enable memory-efficient training with FP16
+
             # === Reward & Tools ===
             reward_func: Reward function (defaults to exact match)
             retrieval_topic: Domain/topic for tool retrieval (e.g., "bio medical", "data science")
@@ -142,13 +144,13 @@ class Brain:
         config.batch_size = batch_size
         config.max_grad_norm = max_grad_norm
         config.use_bitsandbytes = use_bitsandbytes
+        config.fp16 = fp16
         
         # Apply algorithm-specific parameters
         if algorithm.upper() == "GRPO":
             config.epsilon = epsilon
             config.num_group_members = num_group_members
 
-            
         elif algorithm.upper() == "DPO":
             config.beta = beta
             config.loss_type = loss_type

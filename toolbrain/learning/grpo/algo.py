@@ -12,6 +12,7 @@ Objective terms:
 """
 
 import copy
+import logging
 from typing import List, Optional
 
 import torch
@@ -97,9 +98,13 @@ class GRPOAlgorithm:
         validate_config(config)
         self.config = config
 
+        # ----- FP16 or Bitsandbytes setup -----
+        self.fp16 = config.get("fp16", False)
+
         self.training_steps = 0
         use_bitandbytes = config.get("use_bitsandbytes", False)
         if use_bitandbytes:
+            self.fp16 = False  # if bitsandbytes is enabled, disable fp16
             if bnb is None:
                 raise ImportError(
                     "bitsandbytes is not installed but 'use_bitsandbytes=True' was set in config. "
@@ -114,7 +119,6 @@ class GRPOAlgorithm:
                 self.policy.llm.parameters(),
                 lr=self.config["learning_rate"]
             )
-
 
     def _update_policy(self, pi_theta: Policy, loss: torch.Tensor) -> Policy:
         """
@@ -136,8 +140,8 @@ class GRPOAlgorithm:
         loss.backward()
         clip_grad_norm_(model.parameters(), self.config["max_grad_norm"])
         self.optimizer.step()
+
         torch.cuda.empty_cache()
-        # LOG: Replace this comment with logging of loss.item() if desired
         return pi_theta
 
     def train_step(
@@ -162,6 +166,7 @@ class GRPOAlgorithm:
             The per-token log-probs computed by get_per_token_logps drop the first token,
             so advantages and completion_mask are sliced as [:, 1:] to align shapes with log-probs (B, L-1).
         """
+        # torch.cuda.reset_peak_memory_stats()
         device = self.device
         pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
         assert len(segments) == len(
@@ -182,36 +187,39 @@ class GRPOAlgorithm:
         #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
         chunk_len = self.config.get("chunk_len", None)
         with torch.no_grad():
-            pi_theta_old_logps = pi_theta.get_per_token_logps(
-                input_ids=input_ids,  # shape: (B, L)
-                attention_mask=attention_mask,  # shape: (B, L)
-                chunk_len=chunk_len,
-            )  # shape: (B, L-1)
-            pi_ref_logps = self.pi_ref.get_per_token_logps(
-                input_ids=input_ids,  # shape: (B, L)
-                attention_mask=attention_mask,  # shape: (B, L)
-                chunk_len=chunk_len,
-            )  # shape: (B, L-1)
+            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+                pi_theta_old_logps = pi_theta.get_per_token_logps(
+                    input_ids=input_ids,  # shape: (B, L)
+                    attention_mask=attention_mask,  # shape: (B, L)
+                    chunk_len=chunk_len,
+                )  # shape: (B, L-1)
+                pi_ref_logps = self.pi_ref.get_per_token_logps(
+                    input_ids=input_ids,  # shape: (B, L)
+                    attention_mask=attention_mask,  # shape: (B, L)
+                    chunk_len=chunk_len,
+                )  # shape: (B, L-1)
 
         for _ in range(self.config["opt_steps"]):
             # Current policy log-probs
             # get_per_token_logps drops the first token after logits computation, before per-token logprobs.
-            pi_theta_logps = pi_theta.get_per_token_logps(
-                input_ids, attention_mask, chunk_len=chunk_len
-            )  # shape: (B, L-1)
+            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+                pi_theta_logps = pi_theta.get_per_token_logps(
+                    input_ids, attention_mask, chunk_len=chunk_len
+                )  # shape: (B, L-1)
 
-            # Must shift advantages and completion_mask by 1 token
-            # so their shapes match the (B, L-1) log-probs tensors
-            loss = grpo_loss(
-                pi_theta_logps=pi_theta_logps,  # shape: (B, L-1)
-                pi_theta_old_logps=pi_theta_old_logps,  # shape: (B, L-1)
-                pi_ref_logps=pi_ref_logps,  # shape: (B, L-1)
-                advantages=advantages[:, 1:],  # shape: (B, L-1)
-                completion_mask=completion_mask[:, 1:],  # shape: (B, L-1)
-                epsilon=self.config["epsilon"],
-                beta=self.config["beta"],
-            )
-
+                # Must shift advantages and completion_mask by 1 token
+                # so their shapes match the (B, L-1) log-probs tensors
+                loss = grpo_loss(
+                    pi_theta_logps=pi_theta_logps,  # shape: (B, L-1)
+                    pi_theta_old_logps=pi_theta_old_logps,  # shape: (B, L-1)
+                    pi_ref_logps=pi_ref_logps,  # shape: (B, L-1)
+                    advantages=advantages[:, 1:],  # shape: (B, L-1)
+                    completion_mask=completion_mask[:, 1:],  # shape: (B, L-1)
+                    epsilon=self.config["epsilon"],
+                    beta=self.config["beta"],
+                )
+            # peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            # print(f"Peak GPU memory usage: {peak_memory:.2f} GB")
             # Apply update
             pi_theta = self._update_policy(pi_theta, loss)
 
