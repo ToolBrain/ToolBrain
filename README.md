@@ -116,7 +116,7 @@ agent = CodeAgent(
 
 brain = Brain(
     agent,                          # Agent instance
-    algorithm="GRPO",                # Algorithm choice
+    algorithm="GRPO",               # Algorithm choice
     reward_func=reward_exact_match  # A reward function, you can customise any python function as reward
 )
 
@@ -142,7 +142,7 @@ If you are using an agent framework not yet supported, we encourage you to build
 Check out our [`CONTRIBUTING.md`](./CONTRIBUTING.md) guide and the existing implementations in the [`toolbrain/adapters/`](./toolbrain/adapters/) directory to get started.
 
 ## Contributors
-[Quy Minh Le](https://www.linkedin.com/in/quy-minh-le-b70218333/), Minh Sao Khue Luu, [Khanh-Tung Tran](https://www.linkedin.com/in/khanh-tung-tran-83b3541ab), Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, [Hoang Thanh Lam](https://research.ibm.com/people/thanh-hoang) and [Harry Nguyen](https://www.ucc.ie/en/compsci/people/harrynguyen/)
+[Quy Minh Le](https://www.linkedin.com/in/quy-minh-le-b70218333/), [Minh Sao Khue Luu](https://www.linkedin.com/in/lmsk/), [Khanh-Tung Tran](https://www.linkedin.com/in/khanh-tung-tran-83b3541ab), Duc-Hai Nguyen, Hoang-Quoc-Viet Pham,  Quan Le, [Hoang Thanh Lam](https://research.ibm.com/people/thanh-hoang) and [Harry Nguyen](https://www.ucc.ie/en/compsci/people/harrynguyen/)
 
 ---
 
