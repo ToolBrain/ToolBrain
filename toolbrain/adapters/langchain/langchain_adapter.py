@@ -12,7 +12,7 @@ except (ImportError, NotImplementedError):
     FastLanguageModel = None
     UNSLOTH_AVAILABLE = False
 
-from peft import get_peft_model
+from peft import get_peft_model, LoraConfig
 from ..base_adapter import BaseAgentAdapter
 from ...core_types import Trace, Turn, ParsedCompletion, ChatSegment
 from ...models import UnslothModel
@@ -374,7 +374,6 @@ class LangChainAdapter(BaseAgentAdapter):
         
         # Convert dict to LoraConfig object if needed
         if isinstance(lora_config, dict):
-            from peft import LoraConfig
             lora_config = LoraConfig(**lora_config)
         
         # Only apply LoRA to HuggingFace models (all models in this adapter are HuggingFace)
@@ -395,20 +394,57 @@ class LangChainAdapter(BaseAgentAdapter):
         )
         
         if is_unsloth_model:
+            unsloth_params = {
+                "use_gradient_checkpointing": self.config.get("gradient_checkpointing", "unsloth"),
+                "max_seq_length": self.config.get("max_seq_length", 4096),
+                "use_rslora": self.config.get("use_rslora", True),
+                "use_dora": self.config.get("use_dora", False),
+            }
+            
+            lora_params = {
+                "r": lora_config.r,
+                "lora_alpha": lora_config.lora_alpha,
+                "target_modules": lora_config.target_modules,
+                "lora_dropout": lora_config.lora_dropout,
+                "bias": lora_config.bias,
+                "task_type": lora_config.task_type,
+            }
+            
+            # Allow additional unsloth-specific overrides
+            unsloth_overrides = self.config.get("unsloth_config_overrides", {})
+            unsloth_params.update(unsloth_overrides)
+            
+            # Allow LoRA parameter overrides
+            lora_overrides = self.config.get("lora_config_overrides", {})
+            lora_params.update(lora_overrides)
+            
+            # Combine for FastLanguageModel.get_peft_model()
+            final_config = {**unsloth_params, **lora_params}
+            
             # Apply Unsloth LoRA
             new_model = FastLanguageModel.get_peft_model(
                 actual_model,
-                use_gradient_checkpointing="unsloth",
-                r=lora_config.r,
-                lora_alpha=lora_config.lora_alpha,
-                target_modules=lora_config.target_modules,
-                lora_dropout=lora_config.lora_dropout,
-                bias=lora_config.bias,
-                max_seq_length=512,
+                **final_config
             )
         else:
-            # Apply standard LoRA
-            new_model = get_peft_model(actual_model, lora_config)
+            # Base LoRA parameters từ config
+            base_lora_params = {
+                "r": lora_config.r,
+                "lora_alpha": lora_config.lora_alpha,
+                "target_modules": lora_config.target_modules,
+                "lora_dropout": lora_config.lora_dropout,
+                "bias": lora_config.bias,
+                "task_type": lora_config.task_type,
+            }
+            
+            # Apply LoRA overrides 
+            lora_overrides = self.config.get("lora_config_overrides", {})
+            base_lora_params.update(lora_overrides)
+            
+            enhanced_lora_config = LoraConfig(**base_lora_params)
+            
+            # Apply enhanced config
+            new_model = get_peft_model(actual_model, enhanced_lora_config)
         
         # Update the model reference
         if hasattr(trainable_model, 'model'):

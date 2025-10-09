@@ -6,11 +6,15 @@ class BaseConfig(ABC):
     """Base configuration class with common parameters."""
     
     def __init__(self):
-        # Common parameters for all algorithms
+        # Training parameters
         self.learning_rate = 1e-5
         self.max_grad_norm = 1.0
         self.chunk_len = 128
+        
+        # Infrastructure parameters
         self.use_bitsandbytes = False
+        
+        # LoRA configuration
         self.lora_config = LoraConfig(
             r=8,
             lora_alpha=16,
@@ -19,6 +23,15 @@ class BaseConfig(ABC):
             bias="none",
             task_type="CAUSAL_LM",
         )
+        
+        # Unsloth-specific parameters (used when Unsloth is available)
+        self.max_seq_length = 4096
+        self.gradient_checkpointing = "unsloth"
+        self.use_rslora = True   # Better RL performance & convergence
+        self.use_dora = False    # Disabled for RL stability
+        
+        self.unsloth_config_overrides = {}  # Unsloth parameter overrides
+        self.lora_config_overrides = {}  # LoRA parameter overrides
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary for serialization."""

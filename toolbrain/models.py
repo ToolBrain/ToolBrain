@@ -52,8 +52,6 @@ class UnslothModel(TransformersModel):
             **kwargs,
         )
 
-
-
         model_kwargs = model_kwargs or {}
 
         # Load the model and tokenizer using Unsloth's optimized method
