@@ -649,14 +649,33 @@ class Brain:
             torch.cuda.empty_cache()
             gc.collect()
      
-    def _get_distillation_config(self) -> Dict[str, Any]:
-        """Get configuration for distillation."""
+    def _get_distillation_config(
+        self,
+        num_traces: Optional[int] = None,
+        accuracy_threshold: Optional[float] = None,
+        batch_size: Optional[int] = None,
+        learning_rate: Optional[float] = None,
+        use_bitsandbytes: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """
+        Get configuration for distillation with optional overrides.
+        
+        Args:
+            num_traces: Number of traces to collect from teacher model (default: 5)
+            accuracy_threshold: Accuracy threshold for filtering traces (default: 0.9)
+            batch_size: Batch size for training (default: from config or 4)
+            learning_rate: Learning rate for distillation (default: from config or 5e-5)
+            use_bitsandbytes: Whether to use bitsandbytes optimization (default: from config or False)
+        
+        Returns:
+            Dictionary with distillation configuration
+        """
         return {
-            "num_traces": 5, # Number of traces to collect from teacher model
-            "accuracy_threshold": 0.9, # Accuracy threshold for filtering traces
-            "batch_size": self.config.get("batch_size", 4),
-            "learning_rate": self.config.get("learning_rate", 5e-5),
-            "use_bitsandbytes": self.config.get("use_bitsandbytes", False)
+            "num_traces": num_traces if num_traces is not None else 5,
+            "accuracy_threshold": accuracy_threshold if accuracy_threshold is not None else 0.9,
+            "batch_size": batch_size if batch_size is not None else self.config.get("batch_size", 4),
+            "learning_rate": learning_rate if learning_rate is not None else self.config.get("learning_rate", 5e-5),
+            "use_bitsandbytes": use_bitsandbytes if use_bitsandbytes is not None else self.config.get("use_bitsandbytes", False)
         }
     
     
@@ -778,24 +797,52 @@ class Brain:
                         continue
 
     # Distill Knowledge from Teacher to Student
-    def distill(self, dataset: List[Dict[str, Any]], teacher_model_id: str) -> None:
+    def distill(
+        self,
+        dataset: List[Dict[str, Any]],
+        teacher_model_id: str,
+        num_traces: Optional[int] = None,
+        accuracy_threshold: Optional[float] = None,
+        batch_size: Optional[int] = None,
+        learning_rate: Optional[float] = None,
+        use_bitsandbytes: Optional[bool] = None
+    ) -> None:
         """
         Distill knowledge from a teacher model to this Brain's student model.
 
         This method handles the complete distillation pipeline:
         1. Creates a teacher agent with the same tools as the student
         2. Collects execution traces from the teacher using the provided dataset
-        3. Filters high-quality traces (accuracy > 90%)
+        3. Filters high-quality traces (accuracy > threshold)
         4. Trains the student model using supervised learning
 
         Args:
             dataset: Training dataset with query/gold_answer pairs
             teacher_model_id: HuggingFace model ID for the teacher model
+            num_traces: Number of traces to collect from teacher (default: 5)
+            accuracy_threshold: Minimum accuracy to keep traces (default: 0.9)
+            batch_size: Batch size for training (default: from Brain config or 4)
+            learning_rate: Learning rate for distillation (default: from Brain config or 5e-5)
+            use_bitsandbytes: Use memory-efficient training (default: from Brain config or False)
+            
+        Example:
+            >>> brain.distill(
+            ...     dataset=training_data,
+            ...     teacher_model_id="Qwen/Qwen2.5-7B-Instruct",
+            ...     num_traces=10,
+            ...     accuracy_threshold=0.85
+            ... )
         """
         print("\n🎓 Distillation mode activated")
 
-        # Get configuration
-        config = self._get_distillation_config()
+        # Get configuration with user overrides
+        config = self._get_distillation_config(
+            num_traces=num_traces,
+            accuracy_threshold=accuracy_threshold,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            use_bitsandbytes=use_bitsandbytes
+        )
 
         # === Step 1: Collect and filter teacher traces ===
         # Always collect fresh traces from teacher (no caching)
