@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "toolbrain"
-version = "0.1.3"
+version = "0.1.4"
 description = "A framework for training LLM-powered agents to use tools more effectively using Reinforcement Learning"
 readme = "README.md"
 requires-python = ">=3.10"
