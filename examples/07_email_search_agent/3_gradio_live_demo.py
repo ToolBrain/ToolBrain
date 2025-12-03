@@ -28,8 +28,7 @@ AGENT = None
 
 def chat_interface(message, history):
     """
-    Core function for Gradio interaction. It wraps the user's message in the
-    exact, consistent context the agent was trained on.
+    Core function for Gradio interaction.
     """
     if AGENT is None:
         yield "Error: Agent not loaded."
@@ -37,8 +36,6 @@ def chat_interface(message, history):
 
     logging.info(f"Received user query: '{message}'")
     
-    # --- Use the exact context from the successful trace ---
-    # This ensures maximum reliability for the demo.
     simulated_inbox = "gerald.nemec@enron.com"
     simulated_date = "2000-04-30"
 
@@ -82,8 +79,8 @@ def main(args):
         description=f"An interactive demo of an agent fine-tuned on the Enron email dataset. Model loaded from: {args.model_dir}",
         examples=[
             "When is Shari's move to Portland targeted for?",
-            "What is my confirmation number for my Continental Airlines flight to Colorado Springs?",
-            "What issues will be discussed at the Tuesday afternoon meeting with EES?"
+            "What is my t-shirt size for the ECT Legal Conference?",
+            "When is Shonnie going to be in to discuss the MSA amendment?"
         ]
     )
 
