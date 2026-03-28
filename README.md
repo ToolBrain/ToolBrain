@@ -1,11 +1,33 @@
+<p align="center">
+  <img src="docs/assets/octopus_banner.png" alt="ToolBrain Banner" width="100%">
+</p>
+
+<p align="center">
+    <a href="https://pypi.org/project/toolbrain/">
+        <img src="https://img.shields.io/pypi/v/toolbrain" alt="PyPI Version">
+    </a>
+    <a href="https://pypistats.org/packages/toolbrain">
+        <img src="https://img.shields.io/badge/dynamic/json?url=https://pypistats.org/api/packages/toolbrain/recent&query=data.last_month&label=downloads/month" alt="Monthly Downloads">
+    </a>
+    <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
+    <a href="https://arxiv.org/abs/2510.00023">
+        <img src="https://img.shields.io/badge/arXiv-2510.00023-B31B1B.svg" alt="arXiv">
+    </a>
+    <img src="https://img.shields.io/badge/AAMAS-2026-brightgreen" alt="AAMAS 2026">
+    <a href="YOUR_VIDEO_LINK_HERE">
+        <img src="https://img.shields.io/badge/Video-Demo-red?logo=youtube&logoColor=white" alt="Video Demo">
+    </a>
+</p>
+
+---
+
 # ToolBrain 🧠
-![PyPI Version](https://img.shields.io/pypi/v/toolbrain)
-[![Monthly Downloads](https://img.shields.io/badge/dynamic/json?url=https://pypistats.org/api/packages/toolbrain/recent&query=data.last_month&label=downloads/month)](https://pypistats.org/packages/toolbrain)
-
-
+### *RL Framework for Agentic Tools*
 
 ToolBrain is a lightweight open-source Python library for training **agentic systems** with effective tool usage and built-in reinforcement learning.  
-📚  Our website: [toolbrain.org](https://toolbrain.org) and [Documentation & tutorials](docs/source/tutorials/tutorials.md)
+📚 **Website:** [toolbrain.org](https://toolbrain.org)  
+📖 **Documentation:** [Read the Docs](docs/source/tutorials/tutorials.md)  
+📄 **Paper:** [ToolBrain: A Flexible Reinforcement Learning Framework for Agentic Tools (AAMAS 2026)](https://arxiv.org/abs/2510.00023)
 
 Support us by giving ToolBrain a ⭐ on GitHub.
 ## ✨ Key Features
