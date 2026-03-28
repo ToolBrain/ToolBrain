@@ -14,7 +14,7 @@
         <img src="https://img.shields.io/badge/arXiv-2510.00023-B31B1B.svg" alt="arXiv">
     </a>
     <img src="https://img.shields.io/badge/AAMAS-2026-brightgreen" alt="AAMAS 2026">
-    <a href="YOUR_VIDEO_LINK_HERE">
+    <a href="https://www.youtube.com/watch?v=FIgfg-y0sXw">
         <img src="https://img.shields.io/badge/Video-Demo-red?logo=youtube&logoColor=white" alt="Video Demo">
     </a>
 </p>
