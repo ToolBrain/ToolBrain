@@ -17,8 +17,7 @@ from peft import LoraConfig
 # These settings are shared across all experiments in this use case.
 
 # Define the base model to be fine-tuned.
-# BASE_MODEL_ID = "Qwen/Qwen2.5-14B-Instruct"
-BASE_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+BASE_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
 
 # Define the model to be used as the LLM-as-a-Judge.
 # Supported models:
@@ -44,9 +43,9 @@ TRAIN_TEST_SPLIT_RATIO = 0.8
 # NEW: A seed for reproducibility. Using the same seed ensures the split is always the same.
 DATASET_SPLIT_SEED = 42
 
-# Keep this for quick development runs. If set, it will override the ratio split.
-MAX_TRAIN_SAMPLES = 4  # Set to None for the full training run
-MAX_TEST_SAMPLES = 1
+# Full dataset training (None means use the entire 80% split)
+MAX_TRAIN_SAMPLES = None 
+MAX_TEST_SAMPLES = None
 
 
 # --- 2. LoRA Configuration ---
@@ -71,8 +70,8 @@ GRPO_CONFIG = {
     "opt_steps": 4,
     "learning_rate": 1e-5,
     "max_grad_norm": 1.0,
-    "chunk_len": 8,
-    "num_group_members": 2,
+    "chunk_len": 128,
+    "num_group_members": 8,
     "batch_size": 2,
     "lora_config": LORA_CONFIG,
     "use_bitsandbytes": True,
@@ -98,6 +97,8 @@ MAX_TOOL_OUTPUT_CHARS = 16384
 
 MAX_NEW_TOKENS = 512
 
+MAX_AGENT_TURNS = 10
+
 # Run evaluation on the validation set every N training steps.
 VALIDATION_INTERVAL = 2  # The same as ART-E
 
@@ -113,4 +114,3 @@ SYSTEM_PROMPT_TEMPLATE = """You are an email search agent. You are given a user 
 User's email address is {inbox_address}
 Today's date is {query_date}"""
 
-MAX_AGENT_TURNS = 10
