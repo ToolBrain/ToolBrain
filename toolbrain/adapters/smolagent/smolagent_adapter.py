@@ -78,6 +78,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
         """
         try:
             with torch.inference_mode():
+                self.agent.model.model.eval() # set the model to inference mode before collecting on-policy rollouts.
                 self.agent.run(query, reset=True)
 
             # Extract structured trace and RL input as before

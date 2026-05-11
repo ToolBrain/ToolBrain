@@ -188,11 +188,13 @@ class GRPOAlgorithm:
         chunk_len = self.config.get("chunk_len", None)
         with torch.no_grad():
             with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+                pi_theta.llm.eval() # use inference mode when computing per-token probabilities
                 pi_theta_old_logps = pi_theta.get_per_token_logps(
                     input_ids=input_ids,  # shape: (B, L)
                     attention_mask=attention_mask,  # shape: (B, L)
                     chunk_len=chunk_len,
                 )  # shape: (B, L-1)
+                self.pi_ref.llm.eval() # use inference mode when computing per-token probabilities
                 pi_ref_logps = self.pi_ref.get_per_token_logps(
                     input_ids=input_ids,  # shape: (B, L)
                     attention_mask=attention_mask,  # shape: (B, L)
@@ -203,6 +205,11 @@ class GRPOAlgorithm:
             # Current policy log-probs
             # get_per_token_logps drops the first token after logits computation, before per-token logprobs.
             with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+                pi_theta.llm.train() # enable training mode before the backward pass.
+                                     # Required for Unsloth models: per-token probability computation
+                                     # must run in training mode. Using inference mode can trigger
+                                     # autograd failures because Unsloth's inference kernels apply
+                                     # inplace optimizations in the forward pass.
                 pi_theta_logps = pi_theta.get_per_token_logps(
                     input_ids, attention_mask, chunk_len=chunk_len
                 )  # shape: (B, L-1)
@@ -222,6 +229,7 @@ class GRPOAlgorithm:
             # print(f"Peak GPU memory usage: {peak_memory:.2f} GB")
             # Apply update
             pi_theta = self._update_policy(pi_theta, loss)
+            pi_theta.llm.eval() # switch the model back to inference mode after optimization to re-enable inference-time optimizations and disable training behavior.
 
             # Cache current log-probs as next step's old-policy (detach from graph)
             pi_theta_old_logps = pi_theta_logps.detach()
