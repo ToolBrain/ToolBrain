@@ -31,6 +31,7 @@ from .prompt import (
     validate_tools,
     tools_to_card,
 )
+from .logging.base_logger import Logger, Dummy_Logger
 from openai import OpenAI
 from .factory import create_agent
 
@@ -85,7 +86,8 @@ class Brain:
         judge_model_id: str = None, # id of the judge model
 
         # === Advanced (Optional) ===
-        config: Optional[BaseConfig] = None  # For power users only
+        config: Optional[BaseConfig] = None,  # For power users only
+        logger: Optional[Logger] = None # Logger used for logging training metrics
     ):
         """
         Initialize Brain with simple, self-documenting parameters.
@@ -128,6 +130,10 @@ class Brain:
             >>> brain = Brain(agent, algorithm="Supervised", learning_rate=5e-5)
             >>>
         """
+        if logger is None:
+            self.logger = Dummy_Logger()
+        else:
+            self.logger = logger
         
         # Store core settings
         self.agent = agent
@@ -225,7 +231,8 @@ class Brain:
         if self.algorithm in GRPOALiasNames:
             self.learning_module = GRPOAlgorithm(
                 initial_policy=self.policy,
-                config=config_dict
+                config=config_dict,
+                logger=self.logger,
             )
         elif self.algorithm in DPOALiasNames:
             self.learning_module = DPOAlgorithm(
@@ -394,6 +401,7 @@ class Brain:
             avg_reward = np.mean(self.reward_buffer)
             print(
                 f"📈 Sliding window avg reward (last {len(self.reward_buffer)}): {avg_reward:.4f}")
+            self.logger.log_scalar("reward/avg_sliding_window", avg_reward)
             if not traces:
                 print(f"⚠️ No successful traces collected for query: '{query}'. Skipping training step.")
                 return
