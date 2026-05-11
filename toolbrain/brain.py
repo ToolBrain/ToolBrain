@@ -66,6 +66,7 @@ class Brain:
         # === GRPO Specific Parameters ===
         epsilon: float = 0.2,          # GRPO clip ratio
         num_group_members: int = 2,    # Number of traces per training step (reduced for memory efficiency)
+        use_grad_accum_train_step: bool = False, # uses a memory efficient GRPO optimization where it accumulates gradients for each rollout in num_group_members
         
         # === DPO Specific Parameters ===  
         beta: float = 0.1,             # DPO temperature parameter
@@ -134,6 +135,7 @@ class Brain:
         self.trainable_model_override = trainable_model
         self.algorithm = algorithm
         self.batch_size = batch_size
+        self.use_grad_accum_train_step = use_grad_accum_train_step
         
         # Create algorithm-specific config automatically
         if config is None:
@@ -408,7 +410,10 @@ class Brain:
 
         if self.algorithm in GRPOALiasNames:
             print(f"  🧠 Running RL training step with {len(traces)} traces...")
-            self.learning_module.train_step(rl_inputs, rewards)
+            if self.use_grad_accum_train_step:
+                self.learning_module.train_step_with_grad_accum(rl_inputs, rewards) # use a more memory optimized but a slower version
+            else:
+                self.learning_module.train_step(rl_inputs, rewards)
             print(f"  ✅ RL training step completed")
         elif self.algorithm in DPOALiasNames:
             print(f"  🧠 Sample chosen and rejected pairs from traces...")
