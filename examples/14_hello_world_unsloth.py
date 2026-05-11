@@ -77,10 +77,6 @@ model = UnslothModel(
     # },
     max_new_tokens=128
 )
-# model = TransformersModel(
-#     model_id="Qwen/Qwen2.5-0.5B-Instruct",  # use a bigger model for better results
-#     max_new_tokens=128
-# )
 
 agent = CodeAgent(
     model=model,
