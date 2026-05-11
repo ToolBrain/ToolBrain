@@ -230,6 +230,154 @@ class GRPOAlgorithm:
 
         self.policy = pi_theta
         self.training_steps += 1
+    
+    def train_step_with_grad_accum(
+        self,
+        segments: List[List[ChatSegment]],
+        rewards: List[float],
+    ) -> None:
+        """
+        Run one GRPO update over a batch of traces.
+
+        Args:
+            segments (List[List[ChatSegment]]): Batch of traces; each trace is a list of ChatSegment.
+            rewards (List[float]): List of scalar rewards, one per trace.
+
+        Batch returned by build_inputs contains:
+            - input_ids: (B, L) token ids
+            - attention_mask: (B, L) mask for tokens
+            - completion_mask: (B, L) mask indicating completion tokens
+            - advantages: (B, L) advantage values per token
+
+        Note:
+            The per-token log-probs computed by get_per_token_logps drop the first token,
+            so advantages and completion_mask are sliced as [:, 1:] to align shapes with log-probs (B, L-1).
+        """
+        # torch.cuda.reset_peak_memory_stats()
+        device = self.device
+        pi_theta = self.policy  # train the main policy in-place to keep optimizer params in sync
+        assert len(segments) == len(
+            rewards
+        ), f"Length of traces and rewards must be the same. Received {len(segments)} traces, {len(rewards)} rewards."
+
+        batch = build_inputs(
+            segments=segments, rewards=rewards, tokenizer=pi_theta.tokenizer
+        )
+
+        input_ids = batch.input_ids.to(device)  # shape: (B, L)
+        attention_mask = batch.attention_mask.to(device)  # shape: (B, L)
+        completion_mask = batch.completion_mask.to(device)  # shape: (B, L)
+        advantages = batch.advantages.to(device)  # shape: (B, L)
+
+        # Prepare old-policy (for ratio) and a fixed reference (for KL) log-probs.
+        #   - pi_theta_old_logps: starts as current pre-update policy; will be refreshed each grpo loss step.
+        #   - pi_ref_logps: fixed reference for KL across the grpo iteration (use pre-update self.policy).
+        chunk_len = self.config.get("chunk_len", None)
+        with torch.no_grad():
+            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+                pi_theta.llm.eval() # use inference mode when computing per-token probabilities
+                pi_theta_old_logps = pi_theta.get_per_token_logps(
+                    input_ids=input_ids,  # shape: (B, L)
+                    attention_mask=attention_mask,  # shape: (B, L)
+                    chunk_len=chunk_len,
+                )  # shape: (B, L-1)
+                self.pi_ref.llm.eval() # use inference mode when computing per-token probabilities
+                pi_ref_logps = self.pi_ref.get_per_token_logps(
+                    input_ids=input_ids,  # shape: (B, L)
+                    attention_mask=attention_mask,  # shape: (B, L)
+                    chunk_len=chunk_len,
+                )  # shape: (B, L-1)
+
+        for _ in range(self.config["opt_steps"]):
+            # Current policy log-probs
+            # get_per_token_logps drops the first token after logits computation, before per-token logprobs.
+            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self.fp16):
+
+                pi_theta_logps = torch.zeros(size=(input_ids.shape[0], input_ids.shape[1] - 1), device=input_ids.device)
+                loss = torch.tensor(0.0, device=input_ids.device)
+
+                for batch_index in range(input_ids.shape[0]):
+                    cur_input_ids = input_ids[batch_index].unsqueeze(0)
+                    cur_attention_mask = attention_mask[batch_index].unsqueeze(0) # shape: (B, L)
+                    cur_completion_mask = completion_mask[batch_index].unsqueeze(0)[:, 1:] # shape: (B, L-1)
+                    cur_advantages = advantages[batch_index].unsqueeze(0)[:, 1:] # shape: (B, L-1)
+
+                    cur_pi_theta_old_logps = pi_theta_old_logps[batch_index].unsqueeze(0) # shape: (B, L-1)
+                    cur_pi_ref_logps = pi_ref_logps[batch_index].unsqueeze(0) # shape: (B, L-1)
+
+
+                    pi_theta.llm.train() # enable training mode before the backward pass.
+                                        # Required for Unsloth models: per-token probability computation
+                                        # must run in training mode. Using inference mode can trigger
+                                        # autograd failures because Unsloth's inference kernels apply
+                                        # inplace optimizations in the forward pass.
+
+                    cur_pi_theta_logps = pi_theta.get_per_token_logps(
+                        cur_input_ids, cur_attention_mask, chunk_len=chunk_len
+                    )  # shape: (B, L-1)
+                    pi_theta_logps[batch_index, :] = cur_pi_theta_logps.detach()
+
+                    # GRPO Loss:
+                    epsilon=self.config["epsilon"]
+                    beta=self.config["beta"]
+
+                    # Clipped surrogate gain
+                    log_ratio = cur_pi_theta_logps - cur_pi_theta_old_logps  # log(pi_theta) - log(pi_old) = log(pi_theta / pi_old) 
+                    ratio = torch.exp(log_ratio)  # exp(log(pi_theta / pi_old)) = pi_theta / pi_old
+                    unclipped = ratio * cur_advantages  # shape: (B, L)
+
+                    clipped_ratio = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon)
+                    clipped = clipped_ratio * cur_advantages  # shape: (B, L)
+
+                    policy_gain = torch.min(unclipped, clipped)  # shape: (B, L)
+
+                    # KL divergence (Equation 4)
+                    # Equation 4: (pi_ref / pi_theta) - log(pi_ref / pi_theta) - 1
+                    log_kl_ratio = cur_pi_ref_logps - cur_pi_theta_logps  # log(pi_ref) - log(pi_theta) = log(pi_ref / pi_theta)
+                    kl_ratio = torch.exp(log_kl_ratio)  # exp(log(pi_ref / pi_theta)) = pi_ref / pi_theta
+                    kl_divergence = kl_ratio - log_kl_ratio - 1.0  # shape: (B, L)
+
+                    # Token-level loss
+                    per_token_loss = -(policy_gain - beta * kl_divergence)  # shape: (B, L)
+
+                    # Average loss
+                    # 1) Average over non-masked tokens for each completion
+                    # 2) Average equally across completions in the group
+                    mask = cur_completion_mask.to(per_token_loss.dtype)
+                    valid_counts = mask.sum(dim=1).clamp_min(1.0)
+                    per_completion_mean = ((per_token_loss * mask).sum(dim=1)) / valid_counts  # shape: (B,)
+
+                    assert per_completion_mean.shape[0] == 1
+                    cur_loss = per_completion_mean.mean()  # scalar
+
+                    # Update the Policy:
+                    model = getattr(pi_theta, "llm", None) or getattr(pi_theta, "model", None)
+                    if model is None:
+                        raise AttributeError("No model found in pi_theta")
+
+                    model.train()
+                    if batch_index == 0:
+                        self.optimizer.zero_grad(set_to_none=True)
+                    cur_loss = cur_loss / input_ids.shape[0] # scale the loss for grad accumulation
+                    cur_loss.backward() # accumulate the loss for each sample rollout
+                    loss += cur_loss.detach()
+
+                    del cur_pi_theta_logps
+                    del cur_loss
+
+            grad_norm = clip_grad_norm_(model.parameters(), self.config["max_grad_norm"]).item()
+            self.optimizer.step() # update the model params after the accumulation
+            torch.cuda.empty_cache()
+
+            pi_theta.llm.eval() # switch the model back to inference mode after optimization to re-enable inference-time optimizations and disable training behavior.
+
+            # Cache current log-probs as next step's old-policy (detach from graph)
+            pi_theta_old_logps = pi_theta_logps.detach()
+            del pi_theta_logps, loss
+            torch.cuda.empty_cache()
+
+        self.policy = pi_theta
+        self.training_steps += 1
 
     def __repr__(self) -> str:
         return (
