@@ -78,6 +78,7 @@ class SmolAgentAdapter(BaseAgentAdapter):
         """
         try:
             with torch.inference_mode():
+                self.agent.model.model.eval() # set the model to inference mode before collecting on-policy rollouts.
                 self.agent.run(query, reset=True)
 
             # Extract structured trace and RL input as before
@@ -343,7 +344,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
                     "target_modules": lora_config.target_modules,
                     "lora_dropout": lora_config.lora_dropout,
                     "bias": lora_config.bias,
-                    "task_type": lora_config.task_type,
                 }
                 
                 # Allow additional unsloth-specific overrides
@@ -369,7 +369,6 @@ class SmolAgentAdapter(BaseAgentAdapter):
                     "target_modules": lora_config.target_modules,
                     "lora_dropout": lora_config.lora_dropout,
                     "bias": lora_config.bias,
-                    "task_type": lora_config.task_type,
                 }
                 # Apply LoRA overrides
                 lora_overrides = self.config.get("lora_config_overrides", {})

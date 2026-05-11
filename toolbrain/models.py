@@ -34,6 +34,8 @@ class UnslothModel(TransformersModel):
         model_kwargs: Optional[Dict[str, Any]] = None,
         max_seq_length: int = 4096,
         max_new_tokens: int = 4096,
+        dtype: Optional[torch.dtype] = None,
+        load_in_4bit: bool = True,
         **kwargs: Any,
     ):
         """
@@ -58,8 +60,8 @@ class UnslothModel(TransformersModel):
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_id,
             max_seq_length=max_seq_length,
-            dtype=torch.float16,
-            load_in_4bit=True,
+            dtype=dtype,
+            load_in_4bit=load_in_4bit,
             **model_kwargs,
         )
 
@@ -68,6 +70,7 @@ class UnslothModel(TransformersModel):
 
         self._is_vlm = False
         self.model_kwargs = model_kwargs
+        self.apply_chat_template_kwargs = kwargs.get("apply_chat_template_kwargs", {})
         self.streamer = TextIteratorStreamer(
             self.tokenizer, skip_prompt=True, skip_special_tokens=True
         )
