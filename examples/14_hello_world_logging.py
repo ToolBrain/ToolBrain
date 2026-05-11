@@ -88,4 +88,4 @@ brain = Brain(
 )
 
 # 3. Train the agent with RL for 10 training GRPO steps
-brain.train(training_dataset, num_iterations=10)
+brain.train(training_dataset, num_iterations=200)

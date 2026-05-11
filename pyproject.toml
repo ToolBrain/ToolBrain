@@ -62,6 +62,11 @@ unsloth = [
     "toolbrain[transformers]", # Unsloth needs transformers and torch
 ]
 
+# 'tb' for using TB_Logger
+tb = [
+    "tensorboard"
+]
+
 # 'dev' extra for development and testing tools
 dev = [
     "pytest>=7.0.0",
@@ -81,6 +86,7 @@ examples-base = [
 # Full dependencies for running all examples, including advanced ones
 examples-full = [
     "toolbrain[examples-base]",
+    "toolbrain[tb]",
     "toolbrain[unsloth]", # Add the GPU-specific dependencies
 ]
 
