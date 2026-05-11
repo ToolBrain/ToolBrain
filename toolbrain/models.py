@@ -68,6 +68,7 @@ class UnslothModel(TransformersModel):
 
         self._is_vlm = False
         self.model_kwargs = model_kwargs
+        self.apply_chat_template_kwargs = kwargs.get("apply_chat_template_kwargs", {})
         self.streamer = TextIteratorStreamer(
             self.tokenizer, skip_prompt=True, skip_special_tokens=True
         )
