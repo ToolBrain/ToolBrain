@@ -13,19 +13,25 @@ def compute_per_token_logps(
 ) -> torch.Tensor:
     """
     Return per-token log-probs aligned with targets.
-    - logits: (B, L-1, V)
-    - input_ids: (B, L-1)
-    - chunk_len: optional chunk size along L for memory-friendly computation
-    Returns: (B, L-1)
+        - logits: (B, L-1, V)
+        - input_ids: (B, L-1)
+        - chunk_len: optional chunk size along L for memory-friendly computation
+    Returns:
+        - log_probs: (B, L-1) log-prob of the target token at each position
+        - entropy: (B, L-1) entropy of the predicted distribution at each position
     """
     if chunk_len is None:
         lp = logits.log_softmax(dim=-1)  # (B, L-1, V)
-        return lp.gather(dim=-1, index=input_ids.long().unsqueeze(-1)).squeeze(
+        log_probs = lp.gather(dim=-1, index=input_ids.long().unsqueeze(-1)).squeeze(
             -1
         )  # (B, L-1)
+        with torch.no_grad():
+            entropy = -(lp.exp() * lp).sum(dim=-1)  # (B, L-1)
+        return log_probs, entropy
 
     # Chunked path along sequence length
     chunk_outputs: list[torch.Tensor] = []
+    chunk_entropy: list[torch.Tensor] = []
     target_len = input_ids.size(1)
     for start_idx in range(0, target_len, chunk_len):
         end_idx = min(start_idx + chunk_len, target_len)
@@ -35,7 +41,12 @@ def compute_per_token_logps(
                 dim=-1, index=input_ids[:, start_idx:end_idx].long().unsqueeze(-1)
             ).squeeze(-1)
         )  # (B, C)
-    return torch.cat(chunk_outputs, dim=1)  # (B, L-1)
+        with torch.no_grad():
+            chunk_entropy.append(-(lp.exp() * lp).sum(dim=-1))  # (B, C)
+    log_probs = torch.cat(chunk_outputs, dim=1)  # (B, L-1)
+    with torch.no_grad():
+        entropy = torch.cat(chunk_entropy, dim=1)     # (B, L-1)
+    return log_probs, entropy
 
 
 class Policy(nn.Module):
@@ -59,7 +70,8 @@ class Policy(nn.Module):
         chunk_len: int | None = None,
     ) -> torch.Tensor:
         """Return per-token log-probs aligned for causal LM loss
-        (predict token t from context up to t-1).
+        (predict token t from context up to t-1) and per-token entropies 
+        for logging purposes.
         Output shape: (B, L-1).
         """
         logits = self.llm(
@@ -73,10 +85,10 @@ class Policy(nn.Module):
         # the context before it (no preceding token)
         input_ids = input_ids[:, 1:]  # shape: (B, L-1)
 
-        per_token_logps = compute_per_token_logps(
+        per_token_logps, per_token_entropies = compute_per_token_logps(
             logits, input_ids, chunk_len=chunk_len
         )  # shape: (B, L-1)
-        return per_token_logps
+        return per_token_logps, per_token_entropies
 
     def copy(self) -> "Policy":
         """
